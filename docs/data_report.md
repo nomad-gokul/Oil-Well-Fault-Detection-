@@ -187,3 +187,19 @@ Test windows are dominated by long class-7 transients (36%) and normal operation
 window-level accuracy would be misleading: use macro F1 and the instance-level early-warning
 metrics of Task 10. Verified: 45 random stored windows re-derived from the raw 3W files match
 exactly (labels, timestamps and values).
+
+## 4. Tabular features (Task 6)
+
+`python -m owfd.features.build` turns every window into 97 features
+(`data/processed/features/{train,val,test}.parquet`, names in `feature_names.json`):
+
+- **Per sensor (13 x 7):** mean, std, min, max, last value, slope (least-squares change over the
+  window), delta (last - first), 5th/50th/95th percentiles, volatility ratio
+  (log std of the last vs first quarter: growing oscillations, e.g. slugging), turns (share of
+  local extrema: oscillation frequency) and fraction missing.
+- **Cross-sensor (2 x 3):** P-PDG - P-TPT and P-TPT - P-MON-CKP (mean, last, slope): pressure
+  drops along the well and the production line, which shift with restrictions and hydrates.
+- Statistics of a sensor missing for the whole window are NaN (handled natively by XGBoost).
+
+Vectorized NumPy: about 4,000 windows/s on 4 CPU cores (100k synthetic windows in 25 s; all
+655k real windows in 2.6 min).

@@ -12,7 +12,8 @@ install: $(BIN)/python  ## Core + dev dependencies
 	$(BIN)/pip install -q -e ".[dev]"
 
 install-all: $(BIN)/python  ## Everything (ml, api, dashboard, notebooks, dev); CPU-only PyTorch
-	$(BIN)/pip install -q torch --index-url https://download.pytorch.org/whl/cpu
+	# Prefer the small CPU-only wheel; fall back to PyPI where that index is unreachable.
+	$(BIN)/pip install -q torch --index-url https://download.pytorch.org/whl/cpu || true
 	$(BIN)/pip install -q -e ".[ml,api,dashboard,notebooks,dev]"
 
 lint:
