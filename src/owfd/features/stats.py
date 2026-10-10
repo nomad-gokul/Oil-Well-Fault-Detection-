@@ -14,6 +14,9 @@ STATS = (
     "p05", "p50", "p95", "vol_ratio", "turns", "frac_missing",
 )  # fmt: skip
 
+#: Deviation from the stream baseline (this well's normal level), per variable.
+REL_STATS = ("mean_rel", "last_rel", "min_rel", "max_rel")
+
 #: Cross-variable features: (name, variable a, variable b) -> a - b.
 PAIRS = (("dp_pdg_tpt", "P-PDG", "P-TPT"), ("dp_tpt_ckp", "P-TPT", "P-MON-CKP"))
 PAIR_STATS = ("mean", "last", "slope")
@@ -25,6 +28,7 @@ def feature_names(variables: list[str]) -> list[str]:
     names += [
         f"{p}__{s}" for p, a, b in PAIRS if a in variables and b in variables for s in PAIR_STATS
     ]
+    names += [f"{v}__{s}" for v in variables for s in REL_STATS]
     return names
 
 
@@ -35,9 +39,11 @@ def _slope(x: np.ndarray) -> np.ndarray:
     return np.einsum("ntk,t->nk", x - x.mean(axis=1, keepdims=True), t) / (t @ t)
 
 
-def window_features(x: np.ndarray, variables: list[str]) -> np.ndarray:
+def window_features(x: np.ndarray, variables: list[str], baseline: np.ndarray) -> np.ndarray:
     """Compute :func:`feature_names` for a batch of windows.
 
+    ``baseline`` [n, n_vars] is each window's stream baseline (see
+    :func:`owfd.data.windows.causal_baseline`); NaN where unknown.
     Statistics of a variable that is missing for the whole window are NaN (XGBoost handles
     NaN natively); partially missing variables use the scaled fill value (0).
     """
@@ -83,4 +89,12 @@ def window_features(x: np.ndarray, variables: list[str]) -> np.ndarray:
             missing = all_missing[:, ia] | all_missing[:, ib]
             pair = np.stack([d.mean(axis=1), d[:, -1], _slope(d[:, :, None])[:, 0] * t], axis=1)
             out.append(np.where(missing[:, None], np.nan, pair))
+
+    base = baseline.astype(np.float64)
+    rel = np.stack(
+        [per_stat["mean"] - base, per_stat["last"] - base,
+         per_stat["min"] - base, per_stat["max"] - base], axis=2,
+    )  # fmt: skip
+    rel = np.where(all_missing[:, :, None], np.nan, rel)  # [n, k, n_rel], variable-major
+    out.append(rel.reshape(n, k * len(REL_STATS)))
     return np.concatenate(out, axis=1).astype(np.float32)

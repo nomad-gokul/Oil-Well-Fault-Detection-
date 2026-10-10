@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     windows: WindowConfig = Field(default_factory=WindowConfig)
     split: SplitConfig = Field(default_factory=SplitConfig)
     splits_file: Path = Path("configs/splits.json")
+    baseline_s: int = 3600
 
     @classmethod
     def settings_customise_sources(

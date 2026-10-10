@@ -5,7 +5,7 @@ sensor time-series ([Petrobras 3W dataset](https://github.com/petrobras/3W)). Mo
 (XGBoost and a PyTorch sequence model) are served through a FastAPI service and a live
 Streamlit dashboard raises alerts while a fault is still developing.
 
-> Status: work in progress — features done (Task 6 of 22).
+> Status: work in progress — XGBoost baseline done (Task 7 of 22).
 
 ## Setup
 
@@ -32,7 +32,8 @@ python -m owfd.data.profile               # per-instance quality/label profile f
 python -m owfd.data.preprocess            # cleaned instances -> data/processed/clean/
 python -m owfd.data.split                 # leak-free well-level split -> configs/splits.json
 python -m owfd.data.windows               # fit scaler on train, 5-min windows per split
-python -m owfd.features.build             # 97 tabular features per window for XGBoost
+python -m owfd.features.build             # 125 tabular features per window for XGBoost
+python -m owfd.models.train_xgb           # XGBoost baseline (MLflow-tracked), see docs/results.md
 ```
 
 Real instances are split by well (no well in two splits); validation and test use real data

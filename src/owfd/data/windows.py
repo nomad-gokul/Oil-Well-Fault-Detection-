@@ -42,6 +42,30 @@ def map_labels(raw: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return np.where(transient, raw - TRANSIENT_OFFSET, raw), transient
 
 
+BASE_PREFIX = "base__"
+
+
+def base_column(variable: str) -> str:
+    """Name of the window-table column holding the stream baseline of ``variable``."""
+    return f"{BASE_PREFIX}{variable}"
+
+
+def causal_baseline(
+    values: np.ndarray, masks: np.ndarray, ends: np.ndarray, baseline_s: int
+) -> np.ndarray:
+    """Per-window baseline [len(ends), n_vars]: mean of each sensor over the first
+    ``min(end + 1, baseline_s)`` rows, ignoring missing rows (NaN if none observed).
+
+    Causal: a window ending at row ``e`` only uses rows ``0..e``.
+    """
+    observed = ~masks.astype(bool)
+    sums = np.cumsum(np.where(observed, values, 0.0), axis=0, dtype=np.float64)
+    counts = np.cumsum(observed, axis=0)
+    last = np.minimum(ends, baseline_s - 1)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return np.where(counts[last] > 0, sums[last] / counts[last], np.nan)
+
+
 def window_ends(
     labels: pd.Series,
     config: WindowConfig,
@@ -83,6 +107,7 @@ def build_split(
     out_dir: Path,
     cap: int | None = None,
     seed: int = 0,
+    baseline_s: int = 3600,
 ) -> pd.DataFrame:
     """Write ``values.npy`` and ``windows.parquet`` for one split and return the window table.
 
@@ -102,6 +127,10 @@ def build_split(
         blocks.append(values[lo:hi])
         raw = df[LABEL_COLUMN].to_numpy(dtype=np.int64, na_value=-1)[ends]
         event, transient = map_labels(raw)
+        k = len(scaler.variables)
+        base = causal_baseline(
+            df[scaler.variables].to_numpy(np.float64), df[chans[k:]].to_numpy(), ends, baseline_s
+        )
         tables.append(
             pd.DataFrame(
                 {
@@ -115,6 +144,10 @@ def build_split(
                     "event_class": event.astype(np.int8),
                     "is_transient": transient,
                     "is_fault": event > 0,
+                    **{
+                        base_column(v): base[:, j].astype(np.float32)
+                        for j, v in enumerate(scaler.variables)
+                    },  # fmt: skip
                 }
             )
         )
@@ -125,7 +158,14 @@ def build_split(
     table = pd.concat(tables, ignore_index=True) if tables else pd.DataFrame()
     table.to_parquet(out_dir / "windows.parquet")
     (out_dir / "meta.json").write_text(
-        json.dumps({"channels": chans, "window_s": config.window_s, "stride_s": config.stride_s})
+        json.dumps(
+            {
+                "channels": chans,
+                "window_s": config.window_s,
+                "stride_s": config.stride_s,
+                "baseline_s": baseline_s,
+            }
+        )  # fmt: skip
     )
     return table
 
@@ -154,6 +194,11 @@ class WindowStore:
         rows = self._starts[np.asarray(idx)][:, None] + np.arange(self.window_s)
         return np.asarray(self.values[rows], dtype=np.float32)
 
+    def baselines(self, idx: np.ndarray) -> np.ndarray:
+        """Stream baselines [len(idx), n_vars] of the given windows (NaN if unobserved)."""
+        cols = [c for c in self.windows.columns if c.startswith(BASE_PREFIX)]
+        return self.windows[cols].to_numpy(dtype=np.float32)[np.asarray(idx)]
+
 
 def main(argv: list[str] | None = None) -> None:
     """CLI entry point: fit the scaler on train only, then window every split."""
@@ -178,6 +223,7 @@ def main(argv: list[str] | None = None) -> None:
         table = build_split(
             splits["instances"][split], index, clean_dir, scaler, settings.windows,
             processed / "windows" / split, cap=cap, seed=settings.random_seed,
+            baseline_s=settings.baseline_s,
         )  # fmt: skip
         counts = table.groupby(["event_class", "is_transient"]).size().unstack(fill_value=0)
         logger.info("%s: %d windows\n%s", split, len(table), counts.to_string())

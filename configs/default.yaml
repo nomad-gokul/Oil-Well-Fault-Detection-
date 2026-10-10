@@ -24,3 +24,7 @@ split:
   val_frac: 0.15             # share of real instances
   test_frac: 0.20
   n_trials: 20000            # random well assignments searched
+# Per-instance (per-well stream) baseline: running mean of each sensor over the first
+# `baseline_s` seconds, computed causally (only data up to the window end). Used for
+# "deviation from this well's normal level" features.
+baseline_s: 3600

@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 from owfd.features.build import META_COLUMNS, build_features
-from owfd.features.stats import STATS, feature_names, window_features
+from owfd.features.stats import REL_STATS, STATS, feature_names, window_features
 
 VARS = ["P-PDG", "P-TPT", "T-TPT"]
 T = 100
@@ -17,17 +17,24 @@ def window(*columns: np.ndarray, missing: list[np.ndarray] | None = None) -> np.
     return np.concatenate([values, masks], axis=1)[None].astype(np.float32)
 
 
-def feats(x: np.ndarray) -> pd.Series:
-    return pd.Series(window_features(x, VARS)[0], index=feature_names(VARS))
+def feats(x: np.ndarray, base: list[float] | None = None) -> pd.Series:
+    b = np.array([base if base is not None else [0.0] * len(VARS)], dtype=np.float32)
+    return pd.Series(window_features(x, VARS, b)[0], index=feature_names(VARS))
+
+
+def zeros_base(n: int) -> np.ndarray:
+    return np.zeros((n, len(VARS)), np.float32)
 
 
 def test_names_match_output_width() -> None:
     names = feature_names(VARS)
-    assert len(names) == len(VARS) * len(STATS) + 3  # one pair (P-PDG - P-TPT) applies
+    # one pair (P-PDG - P-TPT) applies
+    assert len(names) == len(VARS) * len(STATS) + 3 + len(VARS) * len(REL_STATS)
     assert len(set(names)) == len(names)
     x = np.zeros((5, T, 2 * len(VARS)), np.float32)
-    assert window_features(x, VARS).shape == (5, len(names))
-    assert len(feature_names(["P-PDG", "P-TPT", "T-TPT", "P-MON-CKP"])) == 4 * len(STATS) + 6
+    assert window_features(x, VARS, zeros_base(5)).shape == (5, len(names))
+    four = ["P-PDG", "P-TPT", "T-TPT", "P-MON-CKP"]
+    assert len(feature_names(four)) == 4 * len(STATS) + 6 + 4 * len(REL_STATS)
 
 
 def test_ramp_constant_and_alternating() -> None:
@@ -70,9 +77,21 @@ def test_batch_rows_are_independent() -> None:
     rng = np.random.default_rng(1)
     x = rng.normal(size=(4, T, 2 * len(VARS))).astype(np.float32)
     x[:, :, len(VARS) :] = 0
-    batch = window_features(x, VARS)
+    base = np.random.default_rng(2).normal(size=(4, len(VARS))).astype(np.float32)
+    batch = window_features(x, VARS, base)
     for i in range(4):
-        np.testing.assert_allclose(batch[i], window_features(x[i : i + 1], VARS)[0], rtol=1e-6)
+        single = window_features(x[i : i + 1], VARS, base[i : i + 1])[0]
+        np.testing.assert_allclose(batch[i], single, rtol=1e-6)
+
+
+def test_relative_features_use_the_baseline() -> None:
+    ramp = np.arange(T, dtype=float)
+    f = feats(window(ramp, np.full(T, 3.0), np.zeros(T)), base=[10.0, 3.0, np.nan])
+    assert f["P-PDG__mean_rel"] == pytest.approx(39.5)
+    assert f["P-PDG__last_rel"] == pytest.approx(89)
+    assert f["P-PDG__min_rel"] == pytest.approx(-10) and f["P-PDG__max_rel"] == pytest.approx(89)
+    assert f["P-TPT__mean_rel"] == pytest.approx(0)
+    assert np.isnan(f["T-TPT__mean_rel"])  # unknown baseline
 
 
 class FakeStore:
@@ -85,6 +104,9 @@ class FakeStore:
 
     def batch(self, idx: np.ndarray) -> np.ndarray:
         return self._x[idx]
+
+    def baselines(self, idx: np.ndarray) -> np.ndarray:
+        return np.zeros((len(idx), len(VARS)), np.float32)
 
 
 def test_build_features_chunks_consistently(tmp_path: Path) -> None:

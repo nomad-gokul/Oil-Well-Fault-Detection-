@@ -34,7 +34,7 @@ def build_features(store: WindowStore, variables: list[str], chunk: int = 4096) 
     parts = []
     for lo in range(0, len(store), chunk):
         idx = np.arange(lo, min(lo + chunk, len(store)))
-        parts.append(window_features(store.batch(idx), variables))
+        parts.append(window_features(store.batch(idx), variables, store.baselines(idx)))
     values = np.concatenate(parts) if parts else np.empty((0, len(names)), np.float32)
     features = pd.DataFrame(values, columns=names, index=store.windows.index)
     return pd.concat([store.windows[META_COLUMNS], features], axis=1)
