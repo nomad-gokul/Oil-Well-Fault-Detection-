@@ -1,0 +1,9 @@
+# Written by python -m owfd.models.evaluate
+model: xgb_baseline
+artifacts:
+- artifacts/xgb/xgb_baseline-20261010-212209
+temperature: 1.54447727537597
+alert:
+  threshold: 0.8
+  k: 5
+selected_on: 'validation: detection rate at <= 1.0 false alarms/24 h, then macro F1'
