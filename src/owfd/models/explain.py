@@ -18,7 +18,8 @@ import pandas as pd
 import xgboost as xgb
 
 from owfd.data.schema import CLASS_NAMES
-from owfd.models.metrics import N_CLASSES
+
+N_CLASSES = len(CLASS_NAMES)
 
 logger = logging.getLogger(__name__)
 

@@ -6,6 +6,8 @@ mlflow.db
 *.ckpt
 *.onnx
 
+/build/
+
 # Python
 __pycache__/
 *.py[cod]
