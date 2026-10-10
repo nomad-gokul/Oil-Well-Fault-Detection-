@@ -14,6 +14,8 @@ present in each split. "Fault" metrics treat classes 1–9 as one class versus n
 | xgb_no_missing_features | test | 0.421 | 0.491 | 0.815 | 0.857 | 0.799 | 133,627 |
 | dl_cnn | val | 0.075 | 0.218 | 0.350 | 0.267 | 0.318 | 41,673 |
 | dl_cnn | test | 0.218 | 0.386 | 0.432 | 0.557 | 0.541 | 133,627 |
+| xgb_tuned | val | 0.453 | 0.523 | 0.774 | 0.600 | 0.483 | 41,673 |
+| xgb_tuned | test | 0.433 | 0.505 | 0.811 | 0.857 | 0.810 | 133,627 |
 <!-- results:end -->
 
 ## XGBoost baseline (Task 7)
@@ -119,3 +121,27 @@ output.
 
 Weaker: Abrupt Increase of BSW and Scaling in PCK also lean on absolute pressure levels
 (P-JUS-CKGL mean, P-PDG min), which are partly well-specific rather than physical.
+
+## Hyperparameter tuning (Task 9)
+
+`python -m owfd.models.tune --model xgb --trials 15` — Optuna (TPE sampler, median pruning on
+validation macro F1 reported every 50 trees) on a stratified 30% sample of the training
+windows; the study is stored in `artifacts/optuna.db` and resumes where it stopped. The
+objective only sees train and validation data (tested). Best of 15 trials (5 completed, 10
+pruned): validation macro F1 **0.475** on the sample with `max_depth 3, learning_rate 0.147,
+min_child_weight 15.9, subsample 0.85, colsample_bytree 0.31, reg_lambda 7.6`
+(`configs/xgb_tuned.yaml`): a shallower, more regularised model than the baseline, consistent
+with the cross-well story.
+
+Retrained on all training windows (`--config configs/xgb_tuned.yaml --name xgb_tuned`):
+
+| | Val macro F1 | Test macro F1 | Test fault ROC-AUC |
+|---|---:|---:|---:|
+| xgb_baseline | 0.440 | **0.446** | **0.824** |
+| xgb_tuned | **0.453** | 0.433 | 0.811 |
+
+Better on validation, slightly worse on test: with 7 validation wells the selection signal is
+noisy. The tuned model was still chosen for production because the choice is made on
+validation by a fixed rule (see `docs/early_warning.md`); switching back after looking at the
+test results would be tuning on the test set. The deep model was not tuned: at about 2.5 min
+per epoch on CPU and with validation F1 below 0.1 there was nothing worth tuning.
