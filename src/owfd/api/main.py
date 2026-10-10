@@ -134,7 +134,8 @@ class Service:
         alerts_file = settings.resolve(settings.alerts_file)
         self.alerts = AlertEngine(AlertConfig.from_files(self.manifest["alert"], alerts_file))
         db_url = settings.database_url
-        if db_url.startswith("sqlite:///") and not db_url.startswith("sqlite:////"):
+        relative_sqlite = db_url.startswith("sqlite:///") and not db_url.startswith("sqlite:////")
+        if relative_sqlite and db_url != "sqlite:///:memory:":
             db_url = f"sqlite:///{settings.resolve(Path(db_url.removeprefix('sqlite:///')))}"
         self.store = Store(make_engine(db_url))
         self.alerts.restore(self.store.unresolved_alerts())

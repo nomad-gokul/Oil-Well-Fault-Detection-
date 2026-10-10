@@ -251,3 +251,12 @@ def test_rate_limit_returns_429(bundle: Path, tmp_path: Path) -> None:
         r = c.post("/predict", json=body, headers={"X-Forwarded-For": "203.0.113.9"})
         assert r.status_code == 200  # another client
         assert c.get("/health").status_code == 200  # reads are not limited
+
+
+def test_in_memory_database_creates_no_file(bundle: Path, tmp_path: Path) -> None:
+    from owfd.config import PROJECT_ROOT
+
+    s = Settings(serving_bundle=bundle, database_url="sqlite:///:memory:")
+    with TestClient(create_app(s)) as c:
+        assert c.get("/health").status_code == 200
+    assert not (PROJECT_ROOT / ":memory:").exists()
