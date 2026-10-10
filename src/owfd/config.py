@@ -88,6 +88,7 @@ class Settings(BaseSettings):
     demo_mode: bool = False  # replay the bundled demo wells on startup (public demo)
     demo_speed: int = 60  # demo replay speed (x real time)
     demo_dir: Path = Path("demo_data")
+    log_level: str = "INFO"
 
     @classmethod
     def settings_customise_sources(

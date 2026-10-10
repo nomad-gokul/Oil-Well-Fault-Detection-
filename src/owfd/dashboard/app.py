@@ -264,12 +264,52 @@ def model_tab(model: dict) -> None:
     st.json(m, expanded=False)
 
 
+@st.fragment(run_every=10)
+def system_tab() -> None:
+    try:
+        health = client().health()
+        drift = client().drift()
+    except ApiUnavailableError as exc:
+        api_down(exc)
+        return
+    c = st.columns(3)
+    c[0].metric("API status", health["status"].upper())
+    c[1].metric("Uptime", f"{health['uptime_s'] / 3600:.1f} h")
+    c[2].metric("Model", health["model_version"])
+    st.subheader("Fleet data drift")
+    if drift is None:
+        st.caption("This model bundle has no reference for drift checks.")
+        return
+    if drift["drift"]:
+        bad = [k for k, v in drift["sensors"].items() if v["status"] == "drift"]
+        st.error(f"Fleet-wide drift on: {', '.join(bad)}")
+    else:
+        st.success("No fleet-wide drift")
+    rows = [
+        {
+            "sensor": k,
+            "status": v["status"],
+            "wells checked": v["wells_checked"],
+            "wells unusual": v["wells_unusual"],
+            "share unusual": v["share_unusual"],
+        }
+        for k, v in drift["sensors"].items()
+    ]
+    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+    st.caption(
+        "Per well and sensor, the last 2 h of deviations from the well's own baseline are "
+        "compared with the range seen on real training/validation wells (median offset, "
+        "spread). Drift = at least half of the wells (>= 3) unusual on the same sensor. "
+        "Prometheus metrics: /metrics."
+    )
+
+
 def main() -> None:
     model = sidebar()
     st.title("Oil Well Fault Detection — live alerts")
     if model is None:
         st.stop()
-    tabs = st.tabs(["Fleet", "Well detail", "Alerts", "Model"])
+    tabs = st.tabs(["Fleet", "Well detail", "Alerts", "Model", "System"])
     with tabs[0]:
         fleet(model)
     with tabs[1]:
@@ -285,6 +325,8 @@ def main() -> None:
         alerts_tab()
     with tabs[3]:
         model_tab(model)
+    with tabs[4]:
+        system_tab()
 
 
 main()

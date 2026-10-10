@@ -124,8 +124,49 @@ def build_bundle(
         "class_names": CLASS_NAMES,
         "metrics": metrics,
     }
+    reference = training_reference(settings, PROJECT_ROOT / rel_scaler(serving))
+    if reference is not None:
+        (out_dir / "reference.json").write_text(json.dumps(reference))
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=1, default=str))
     return manifest
+
+
+def rel_scaler(serving: dict[str, Any]) -> str:
+    """Scaler of the first member (all members share the training scaler)."""
+    return f"{serving['artifacts'][0]}/scaler.json"
+
+
+def training_reference(
+    settings: Any, scaler_path: Path, n_instances: int = 400
+) -> dict[str, Any] | None:
+    """Fleet-drift reference: ranges of window statistics over 2-hour windows of real training
+    and validation wells (see ``owfd.monitoring.drift``); None if processed data is missing."""
+    import pandas as pd
+
+    from owfd.data.clean import Scaler, mask_column
+    from owfd.data.split import load_splits
+    from owfd.monitoring.drift import build_reference, deviations_from_baseline
+
+    clean_dir = settings.resolve(settings.processed_data_dir) / "clean"
+    splits_file = settings.resolve(settings.splits_file)
+    index_file = settings.resolve(settings.processed_data_dir) / "instances.parquet"
+    if not (clean_dir.exists() and splits_file.exists() and index_file.exists()):
+        logger.warning("No processed training data: bundle without drift reference")
+        return None
+    scaler = Scaler.load(scaler_path)
+    splits = load_splits(splits_file)
+    real = set(pd.read_parquet(index_file).query("source == 'real'")["instance_id"])
+    ids = sorted(real & set(splits["instances"]["train"] + splits["instances"]["val"]))
+    rng = np.random.default_rng(settings.random_seed)
+    windows = []
+    for iid in rng.choice(ids, size=min(n_instances, len(ids)), replace=False):
+        df = scaler.transform(pd.read_parquet(clean_dir / f"{iid}.parquet"))
+        for v in scaler.variables:
+            df[v] = df[v].where(~df[mask_column(v)])
+        dev = deviations_from_baseline(df, scaler.variables, settings.baseline_s)
+        start = int(rng.integers(0, max(1, len(dev) - 7200)))
+        windows.append(dev.iloc[start : start + 7200])
+    return build_reference(windows, scaler.variables)
 
 
 def main(argv: list[str] | None = None) -> None:

@@ -54,6 +54,8 @@ packaging==26.3
     # via onnxruntime
 pandas==3.0.6
     # via owfd (pyproject.toml)
+prometheus-client==0.26.0
+    # via owfd (pyproject.toml)
 protobuf==7.36.2
     # via onnxruntime
 pyarrow==26.0.0

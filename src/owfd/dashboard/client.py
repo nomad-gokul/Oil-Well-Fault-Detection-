@@ -90,6 +90,15 @@ class Client:
         """``POST /alerts/{id}/ack``."""
         return dict(self._post(f"/alerts/{alert_id}/ack"))
 
+    def drift(self) -> dict[str, Any] | None:
+        """``GET /monitoring/drift`` (None if the bundle has no training reference)."""
+        try:
+            return dict(self._get("/monitoring/drift"))
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                return None
+            raise
+
     def demo(self) -> dict[str, Any]:
         """``GET /demo``."""
         return dict(self._get("/demo"))

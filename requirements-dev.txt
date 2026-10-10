@@ -137,6 +137,8 @@ pluggy==1.6.0
     #   pytest-cov
 pre-commit==4.6.2
     # via owfd (pyproject.toml)
+prometheus-client==0.26.0
+    # via owfd (pyproject.toml)
 protobuf==7.36.2
     # via onnxruntime
 psutil==7.2.2

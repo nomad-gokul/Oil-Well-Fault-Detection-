@@ -2,6 +2,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
@@ -20,8 +21,13 @@ def bundle(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 def settings(bundle: Path, db: Path, **kw: Any) -> Settings:
-    return Settings(serving_bundle=bundle, database_url=f"sqlite:///{db}", api_key="secret",
-                    alerts_file=Path("configs/alerts.yaml"), **kw)  # fmt: skip
+    return Settings(
+        serving_bundle=bundle,
+        database_url=f"sqlite:///{db}",
+        api_key="secret",
+        alerts_file=Path("configs/alerts.yaml"),
+        **kw,
+    )
 
 
 @pytest.fixture
@@ -31,8 +37,13 @@ def client(bundle: Path, tmp_path: Path) -> Iterator[TestClient]:
 
 
 def payload(df: pd.DataFrame, well: str = "WELL-T") -> dict[str, Any]:
-    readings = [{"timestamp": ts.isoformat(), "values": {k: (None if pd.isna(v) else float(v))
-                 for k, v in row.items()}} for ts, row in df.iterrows()]  # fmt: skip
+    readings = [
+        {
+            "timestamp": ts.isoformat(),
+            "values": {k: (None if pd.isna(v) else float(v)) for k, v in row.items()},
+        }
+        for ts, row in df.iterrows()
+    ]
     return {"well_id": well, "readings": readings}
 
 
@@ -188,3 +199,29 @@ def test_demo_mode_starts_on_startup(bundle: Path, tmp_path: Path) -> None:
     with TestClient(create_app(s)) as c:
         status = c.get("/demo").json()
         assert status["running"] and status["loop"] is True
+
+
+def test_metrics_and_drift(bundle: Path, tmp_path: Path) -> None:
+    import json
+
+    from owfd.monitoring.drift import build_reference
+
+    rng = np.random.default_rng(0)
+    windows = [pd.DataFrame({"P-PDG": rng.normal(0, 1, 3600)}) for _ in range(30)]
+    (bundle / "reference.json").write_text(json.dumps(build_reference(windows, ["P-PDG"])))
+    try:
+        with TestClient(create_app(settings(bundle, tmp_path / "db.sqlite"))) as c:
+            empty = c.get("/monitoring/drift").json()
+            assert empty["drift"] is False and empty["sensors"]["P-PDG"]["wells_checked"] == 0
+            c.post("/ingest", json=payload(raw_instance(2400)), headers=KEY)
+            c.get("/health")
+            body = c.get("/metrics").text
+            assert 'owfd_http_requests_total{method="POST",path="/ingest",status="200"} 1.0' in body
+            assert "owfd_predictions_total" in body and 'owfd_model_info{model="ensemble"' in body
+            drift = c.get("/monitoring/drift").json()
+            assert "WELL-T" in drift["wells"] and drift["sensors"]["P-PDG"]["wells_checked"] == 1
+            assert "owfd_drift_max_share_unusual" in c.get("/metrics").text
+    finally:
+        (bundle / "reference.json").unlink()
+    with TestClient(create_app(settings(bundle, tmp_path / "db2.sqlite"))) as c:
+        assert c.get("/monitoring/drift").status_code == 404  # bundle without reference

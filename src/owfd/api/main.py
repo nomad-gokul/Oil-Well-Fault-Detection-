@@ -24,6 +24,14 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Web
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
+from prometheus_client import (
+    CONTENT_TYPE_LATEST,
+    CollectorRegistry,
+    Counter,
+    Gauge,
+    Histogram,
+    generate_latest,
+)
 from starlette.websockets import WebSocketDisconnect
 
 from owfd.api.db import Store, make_engine
@@ -47,6 +55,39 @@ from owfd.inference.predictor import Prediction, Predictor, StreamingPredictor
 logger = logging.getLogger("owfd.api")
 
 RECENT_S = 2 * 3600  #: seconds of raw readings kept per well for the dashboard
+
+
+class Metrics:
+    """Prometheus metrics (one registry per app, so test apps do not collide)."""
+
+    def __init__(self, version: str, model: str) -> None:
+        self.registry = CollectorRegistry()
+        r = self.registry
+        self.requests = Counter(
+            "owfd_http_requests", "HTTP requests", ["method", "path", "status"], registry=r
+        )
+        self.latency = Histogram(
+            "owfd_http_request_seconds",
+            "HTTP request latency",
+            ["method", "path"],
+            registry=r,
+            buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5),
+        )
+        self.predictions = Counter(
+            "owfd_predictions", "Predictions by class", ["class_name"], registry=r
+        )
+        self.alerts_opened = Counter(
+            "owfd_alerts_opened", "Alerts opened", ["class_name", "severity"], registry=r
+        )
+        self.wells = Gauge("owfd_wells_streaming", "Wells with a streaming state", registry=r)
+        self.drift = Gauge(
+            "owfd_drift_max_share_unusual",
+            "Largest share of wells unusual on one sensor at the last drift check",
+            registry=r,
+        )
+        Gauge("owfd_model_info", "Serving model", ["version", "model"], registry=r).labels(
+            version, model
+        ).set(1)
 
 
 class JsonFormatter(logging.Formatter):
@@ -103,6 +144,37 @@ class Service:
         self.recent: dict[str, deque[pd.DataFrame]] = defaultdict(deque)
         self.demo_task: asyncio.Task[int] | None = None
         self.demo_info: dict[str, Any] = {}
+        self.metrics = Metrics(self.version, self.manifest["model"])
+        ref = self.bundle / "reference.json"
+        self.reference: dict[str, Any] | None = (
+            json.loads(ref.read_text()) if ref.exists() else None
+        )
+
+    def drift(self) -> dict[str, Any]:
+        """PSI of recent live readings (all wells) against the training distribution."""
+        from owfd.data.clean import clean_instance, mask_column
+        from owfd.monitoring.drift import fleet_drift
+
+        if self.reference is None or "variables" not in self.reference:
+            raise HTTPException(404, "this bundle has no training reference for drift checks")
+        variables = self.predictor.variables
+        wells: dict[str, pd.DataFrame] = {}
+        for well, chunks in self.recent.items():
+            state = self.stream.wells.get(well)
+            if not chunks or state is None:
+                continue
+            raw = pd.concat(chunks)
+            df = self.predictor.scaler.transform(clean_instance(raw, self.predictor.preprocessing))
+            for v in variables:
+                df[v] = df[v].where(~df[mask_column(v)])
+            with np.errstate(invalid="ignore", divide="ignore"):
+                base = np.where(state.base_cnt > 0, state.base_sum / state.base_cnt, np.nan)
+            wells[well] = df[variables] - base  # deviations from this well's own baseline
+        report = fleet_drift(self.reference, wells)
+        report["window_s"] = RECENT_S
+        shares = [s["share_unusual"] for s in report["sensors"].values()]
+        self.metrics.drift.set(max(shares, default=0.0))
+        return report
 
     def remember(self, well_id: str, df: pd.DataFrame) -> None:
         """Keep the last ``RECENT_S`` seconds of readings for ``well_id``."""
@@ -130,6 +202,8 @@ class Service:
             events: list[AlertEvent] = []
             for p in preds:
                 events += self.alerts.process(p)
+                self.metrics.predictions.labels(p.class_name).inc()
+            self.metrics.wells.set(len(self.stream.wells))
             alerts_out = []
             for ev in events:
                 drivers = None
@@ -142,6 +216,7 @@ class Service:
                 out = self.alert_out(ev.alert, drivers)
                 alerts_out.append(out)
                 if ev.kind == "opened":
+                    self.metrics.alerts_opened.labels(out.class_name, out.severity).inc()
                     asyncio.create_task(self.notify(out))
         pred_out = [self.prediction_out(p) for p in preds]
         for po in pred_out:
@@ -289,6 +364,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        configure_logging(settings.log_level)
         svc = Service(settings)
         app.state.service = svc
         logger.info("Loaded bundle %s", svc.version)
@@ -320,6 +396,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         t0 = time.perf_counter()
         response = await call_next(request)
         response.headers["X-Request-ID"] = rid
+        elapsed = time.perf_counter() - t0
+        svc = getattr(request.app.state, "service", None)
+        if svc is not None:
+            route = request.scope.get("route")
+            path = getattr(route, "path", "unmatched")  # template, e.g. /alerts/{alert_id}/ack
+            svc.metrics.requests.labels(request.method, path, str(response.status_code)).inc()
+            svc.metrics.latency.labels(request.method, path).observe(elapsed)
         logger.info(
             "request",
             extra={
@@ -328,7 +411,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "method": request.method,
                     "path": request.url.path,
                     "status": response.status_code,
-                    "ms": round((time.perf_counter() - t0) * 1000, 1),
+                    "ms": round(elapsed * 1000, 1),
                 }
             },
         )
@@ -478,6 +561,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         """Stop the demo replay."""
         return svc.stop_demo()
 
+    @app.get("/metrics", tags=["monitoring"], include_in_schema=False)
+    def metrics(svc: Svc) -> Response:
+        """Prometheus metrics."""
+        return Response(generate_latest(svc.metrics.registry), media_type=CONTENT_TYPE_LATEST)
+
+    @app.get("/monitoring/drift", tags=["monitoring"])
+    def drift(svc: Svc) -> dict[str, Any]:
+        """Fleet-level drift: per sensor, the share of wells whose last 2 h of deviations from
+        their own baseline fall outside the range seen on real training/validation wells;
+        drift when at least half of the wells (and >= 3) are unusual on the same sensor."""
+        return svc.drift()
+
     @app.websocket("/ws/{well_id}")
     async def feed(ws: WebSocket, well_id: str) -> None:
         """Live predictions and alerts for one well (``all`` for every well)."""
@@ -499,7 +594,10 @@ def configure_logging(level: str = "INFO") -> None:
     handler.setFormatter(JsonFormatter())
     root = logging.getLogger()
     root.handlers[:] = [handler]
-    root.setLevel(level)
+    root.setLevel(level.upper())
+    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        logging.getLogger(name).handlers[:] = []
+        logging.getLogger(name).propagate = True
 
 
 app = create_app() if __name__ != "__main__" else None  # uvicorn owfd.api.main:app
