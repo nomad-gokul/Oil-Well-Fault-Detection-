@@ -268,6 +268,7 @@ def main(argv: list[str] | None = None) -> None:
         d for d in (_latest(artifacts / "xgb", "xgb_baseline"), _latest(artifacts / "dl", "dl_cnn"),
                     _latest(artifacts / "dl", "dl_gru")) if d is not None
     ]  # fmt: skip
+    dirs = [d.resolve() for d in dirs]  # relative paths from the CLI are fine too
     names = {d: d.name.rsplit("-", 2)[0] for d in dirs}
     proba: dict[str, dict[str, np.ndarray]] = {}
     meta: dict[str, pd.DataFrame] = {}

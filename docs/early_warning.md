@@ -16,34 +16,36 @@ The production model is also chosen on validation; test numbers are reported onc
 
 ## Model comparison
 
-| | XGBoost | CNN | Ensemble (mean) |
-|---|---:|---:|---:|
-| Val macro F1 (windows) | **0.440** | 0.075 | 0.350 |
-| Test macro F1 (windows) | **0.446** | 0.218 | 0.413 |
-| Calibration error, test (ECE, raw → calibrated) | 0.127 → **0.088** | 0.399 → 0.242 | 0.145 → 0.125 |
-| Tuned rule (threshold, k) | 0.80, 5 | 0.90, 1 | 0.90, 5 |
-| Val: faults detected / false alarms per day | 21% / 0.92 | 0% / 0.00 | 14% / 0.57 |
-| **Test: faults detected** (126 instances) | **57%** | 3% | 44% |
-| Test: median delay after fault onset | **4 min** | 424 min | 4 min |
-| Test: median lead time before steady state | 559 min | 84 min | 854 min |
-| Test: false alarms per 24 h of normal operation | 3.3 | 0.05 | 2.1 |
+| | XGBoost baseline | **XGBoost tuned** | CNN | Ensemble (mean) |
+|---|---:|---:|---:|---:|
+| Val macro F1 (windows) | 0.440 | **0.453** | 0.075 | 0.437 |
+| Test macro F1 (windows) | 0.446 | 0.433 | 0.218 | 0.447 |
+| Calibration error, test (ECE, raw → calibrated) | 0.127 → 0.088 | 0.109 → 0.110 | 0.399 → 0.242 | 0.114 → 0.110 |
+| Tuned rule (threshold, k) | 0.80, 5 | 0.85, 5 | 0.90, 1 | 0.85, 5 |
+| **Val: faults detected / false alarms per day** | 21% / 0.92 | **22% / 0.57** | 0% / 0.00 | 19% / 0.88 |
+| Test: faults detected (126 instances) | 57% | 56% | 3% | 52% |
+| Test: median delay after fault onset | 4 min | 4 min | 424 min | 4 min |
+| Test: median lead time before steady state | 559 min | 217 min | 84 min | 427 min |
+| Test: false alarms per 24 h of normal operation | 3.3 | **2.9** | 0.05 | 1.9 |
 
-**Chosen: XGBoost** (`configs/serving.yaml`): best validation detection within the false-alarm
-budget, and best macro F1. The ensemble does not beat XGBoost alone because the CNN adds noise.
+**Chosen: XGBoost tuned** (`configs/serving.yaml`): best validation detection within the
+false-alarm budget (and fewer validation false alarms). On the test wells it performs about the
+same as the baseline: slightly fewer detections (56% vs 57%) and fewer false alarms (2.9 vs 3.3
+per day).
 
-## XGBoost per event class (test wells)
+## Production model per event class (test wells)
 
 | Class | Instances | Detected | Median lead (min) | Median delay (min) |
 |---|---:|---:|---:|---:|
-| 1 Abrupt Increase of BSW | 2 | 50% | 379 | 272 |
+| 1 Abrupt Increase of BSW | 2 | 0% | – | – |
 | 2 Spurious Closure of DHSV | 3 | **100%** | 67 | 5 |
-| 3 Severe Slugging | 31 | 23% | – (no transient) | 84 |
+| 3 Severe Slugging | 31 | 19% | – (no transient) | 72 |
 | 4 Flow Instability | 64 | 67% | – (no transient) | 4 |
-| 5 Rapid Productivity Loss | 6 | 33% | 1,516 | 2 |
-| 6 Quick Restriction in PCK | 3 | 33% | 12 | 0 |
-| 7 Scaling in PCK | 10 | **100%** | 1,372 | 162 |
-| 8 Hydrate in Production Line | 2 | **100%** | 1,669 | 31 |
-| 9 Hydrate in Service Line | 5 | 60% | -3 | 71 |
+| 5 Rapid Productivity Loss | 6 | 33% | 1,249 | 269 |
+| 6 Quick Restriction in PCK | 3 | 33% | 9 | 3 |
+| 7 Scaling in PCK | 10 | **100%** | 1,406 | 348 |
+| 8 Hydrate in Production Line | 2 | **100%** | 1,670 | 31 |
+| 9 Hydrate in Service Line | 5 | 60% | 0 | 11 |
 
 Lead times are long for slowly developing faults (scaling and hydrates develop over a day or
 more), and minutes for fast ones (DHSV closure: alert 5 min after onset, about an hour before the
@@ -52,7 +54,7 @@ steady state).
 ## Honest caveats
 
 - **False alarms do not transfer perfectly across wells.** The rule was held to 1 false alarm per
-  day on the validation wells but gives 3.3 per day on the test wells (959 h of normal
+  day on the validation wells but gives 2.9 per day on the test wells (959 h of normal
   operation). In production the threshold should be re-tuned per well or per field after a
   burn-in period; [the trade-off plot](figures/alert_tradeoff.png) shows the available
   operating points (e.g. lower thresholds detect 60–90% of faults at 10–25 false alarms/day).
