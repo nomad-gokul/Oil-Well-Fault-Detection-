@@ -29,6 +29,22 @@ class PreprocessingConfig(BaseModel):
     scaler_sample_every_s: int = 10
 
 
+class WindowConfig(BaseModel):
+    """Sliding-window options (see ``configs/default.yaml``)."""
+
+    window_s: int = 300
+    stride_s: int = 60
+    max_train_windows_per_instance: int = 300
+
+
+class SplitConfig(BaseModel):
+    """Train/val/test split options (see ``configs/default.yaml``)."""
+
+    val_frac: float = 0.15
+    test_frac: float = 0.20
+    n_trials: int = 20000
+
+
 class Settings(BaseSettings):
     """Paths and global settings. Env vars (``OWFD_*``) take precedence over the YAML file."""
 
@@ -46,6 +62,9 @@ class Settings(BaseSettings):
     artifacts_dir: Path = Path("artifacts")
     random_seed: int = 42
     preprocessing: PreprocessingConfig = Field(default_factory=PreprocessingConfig)
+    windows: WindowConfig = Field(default_factory=WindowConfig)
+    split: SplitConfig = Field(default_factory=SplitConfig)
+    splits_file: Path = Path("configs/splits.json")
 
     @classmethod
     def settings_customise_sources(

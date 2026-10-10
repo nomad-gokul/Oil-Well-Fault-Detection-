@@ -110,3 +110,80 @@ These follow from the numbers above and are applied in Tasks 4 and 5.
 8. **Label caveats.** Classes 3 and 4 have no transient label, so early warning is undefined for
    them (detection only). 43 of the 57 real class-9 instances contain only normal labels; with
    labels taken at the window end these simply become normal windows.
+
+## 3. Splits and windows (Task 5)
+
+Created by `python -m owfd.data.split` (manifest: [`configs/splits.json`](../configs/splits.json),
+seed 42) and `python -m owfd.data.windows`.
+
+**Rules**
+
+- Real instances are split **by well**: no well appears in two splits (tested).
+- Validation and test contain **real instances only**; all simulated and hand-drawn instances
+  go to training.
+- Wells are assigned by a seeded search over 20,000 random assignments that rewards covering
+  every class in test (then val), keeps val/test near 15% / 20% of real instances, and keeps at
+  least one real well in training for classes with no synthetic data (0 Normal, 4 Flow Instability).
+- The scaler is fit on **training instances only** (`artifacts/preprocessing/scaler.json`).
+
+**Wells per split**
+
+| Split | Wells |
+|---|---|
+| train (23) | 00002, 00005, 00008, 00010, 00011, 00012, 00013, 00015, 00019, 00021, 00023, 00024, 00025, 00026, 00027, 00028, 00031, 00033, 00034, 00035, 00039, 00041, 00042 |
+| val (7) | 00001, 00007, 00009, 00016, 00029, 00036, 00037 |
+| test (10) | 00003, 00004, 00006, 00014, 00020, 00022, 00030, 00032, 00038, 00040 |
+
+**Instances per class and split**
+
+| Class | Event | Train real | Train sim | Train drawn | Val | Test |
+|---|---|---:|---:|---:|---:|---:|
+| 0 | Normal Operation | 348 | 0 | 0 | 95 | 151 |
+| 1 | Abrupt Increase of BSW | 1 | 114 | 10 | 1 | 2 |
+| 2 | Spurious Closure of DHSV | 18 | 16 | 0 | 1 | 3 |
+| 3 | Severe Slugging | 0 | 74 | 0 | 1 | 31 |
+| 4 | Flow Instability | 233 | 0 | 0 | 46 | 64 |
+| 5 | Rapid Productivity Loss | 1 | 439 | 0 | 4 | 6 |
+| 6 | Quick Restriction in PCK | 3 | 215 | 0 | 0 | 3 |
+| 7 | Scaling in PCK | 25 | 0 | 10 | 1 | 10 |
+| 8 | Hydrate in Production Line | 11 | 81 | 0 | 1 | 2 |
+| 9 | Hydrate in Service Line | 40 | 150 | 0 | 10 | 7 |
+| | **Total** | **680** | **1,089** | **20** | **160** | **279** |
+
+**Caveats**
+
+- Every class is in the test set, but several fault classes have only 1–3 real test instances
+  (from 1–2 wells), so per-class test scores for 1, 2, 6 and 8 are very noisy.
+- Validation has no class 6 instance (its 2 real wells are in train and test), and only one
+  instance of classes 1, 2, 3, 7 and 8, so model selection relies mostly on classes 0, 4, 5 and 9.
+- Class 3 (Severe Slugging) has no real training instance: the model learns it from simulated
+  data only and is tested on real data from well 00014, a direct sim-to-real check.
+
+**Windows**
+
+A window is the 300 s (5 min) of data ending at a labelled row; its label is the label of that
+row (event class 0–9, plus `is_transient` for 1xx labels). Windows are taken every 60 s, aligned
+to the end of each instance. The first, unlabelled hour of real instances only serves as history.
+Training keeps at most 300 windows per instance so multi-day instances do not dominate.
+Inputs per window: 7 scaled sensors + 7 missing masks = 14 channels.
+
+**Window counts** (normal / steady-state fault / transient), 2 GB on disk as float16:
+
+| Class | Train | Val | Test |
+|---|---|---|---|
+| 0 Normal | 124,368 / – / – | 32,744 / – / – | 57,565 / – / – |
+| 1 Abrupt Increase of BSW | – / 13,016 / 20,916 | – / 78 / 163 | – / 37 / 815 |
+| 2 Spurious Closure of DHSV | – / 3,885 / 1,738 | – / 19 / 35 | – / 66 / 254 |
+| 3 Severe Slugging | – / 22,112 / – | – / 300 / – | – / 9,202 / – |
+| 4 Flow Instability | – / 27,840 / – | – / 5,570 / – | – / 7,657 / – |
+| 5 Rapid Productivity Loss | – / 109,055 / 21,727 | – / 133 / 148 | – / 79 / 5,045 |
+| 6 Quick Restriction in PCK | – / 43,614 / 17,507 | – / – / – | – / 11 / 32 |
+| 7 Scaling in PCK | – / 218 / 8,611 | – / 16 / 639 | – / 408 / 47,393 |
+| 8 Hydrate in Production Line | – / 6,801 / 18,759 | – / 68 / 1,373 | – / 285 / 3,400 |
+| 9 Hydrate in Service Line | – / 23,007 / 16,896 | – / 36 / 351 | – / 5 / 1,373 |
+| **Total** | **480,070** | **41,673** | **133,627** |
+
+Test windows are dominated by long class-7 transients (36%) and normal operation (43%), so
+window-level accuracy would be misleading: use macro F1 and the instance-level early-warning
+metrics of Task 10. Verified: 45 random stored windows re-derived from the raw 3W files match
+exactly (labels, timestamps and values).

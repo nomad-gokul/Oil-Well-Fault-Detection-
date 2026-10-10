@@ -5,7 +5,7 @@ sensor time-series ([Petrobras 3W dataset](https://github.com/petrobras/3W)). Mo
 (XGBoost and a PyTorch sequence model) are served through a FastAPI service and a live
 Streamlit dashboard raises alerts while a fault is still developing.
 
-> Status: work in progress — preprocessing done (Task 4 of 22).
+> Status: work in progress — splits and windows done (Task 5 of 22).
 
 ## Setup
 
@@ -30,9 +30,12 @@ python -m owfd.data.download              # sparse clone of petrobras/3W into da
 python -m owfd.data.download --path ~/3W  # or link an existing local copy
 python -m owfd.data.profile               # per-instance quality/label profile for the EDA
 python -m owfd.data.preprocess            # cleaned instances -> data/processed/clean/
+python -m owfd.data.split                 # leak-free well-level split -> configs/splits.json
+python -m owfd.data.windows               # fit scaler on train, 5-min windows per split
 ```
 
-This builds `data/processed/instances.parquet`, an index of all 2,228 instances (1,119 real
+Real instances are split by well (no well in two splits); validation and test use real data
+only. This builds `data/processed/instances.parquet`, an index of all 2,228 instances (1,119 real
 from 40 wells, 1,089 simulated, 20 hand-drawn). See [docs/data_report.md](docs/data_report.md).
 
 ## Project layout

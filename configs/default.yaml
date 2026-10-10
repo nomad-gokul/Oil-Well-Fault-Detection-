@@ -14,3 +14,13 @@ preprocessing:
   stuck_after_s: 1800        # a value unchanged this long is treated as a stuck sensor (missing)
   clip_quantiles: [0.001, 0.999]  # robust clipping bounds, fit on training data
   scaler_sample_every_s: 10  # row subsampling when fitting the scaler
+
+# Windowing and splits (Task 5).
+windows:
+  window_s: 300              # 5-minute windows at 1 Hz
+  stride_s: 60               # one window per minute
+  max_train_windows_per_instance: 300  # caps multi-day instances in training only
+split:
+  val_frac: 0.15             # share of real instances
+  test_frac: 0.20
+  n_trials: 20000            # random well assignments searched
