@@ -11,8 +11,9 @@ $(BIN)/python:
 install: $(BIN)/python  ## Core + dev dependencies
 	$(BIN)/pip install -q -e ".[dev]"
 
-install-all: $(BIN)/python  ## Everything (ml, api, dashboard, dev)
-	$(BIN)/pip install -q -e ".[ml,api,dashboard,dev]"
+install-all: $(BIN)/python  ## Everything (ml, api, dashboard, notebooks, dev); CPU-only PyTorch
+	$(BIN)/pip install -q torch --index-url https://download.pytorch.org/whl/cpu
+	$(BIN)/pip install -q -e ".[ml,api,dashboard,notebooks,dev]"
 
 lint:
 	$(BIN)/ruff check src tests
