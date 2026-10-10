@@ -48,8 +48,9 @@ class Explainer:
         return ex
 
     def _init(self, model_file: Path, features: list[str]) -> None:
-        self.booster = xgb.Booster()
-        self.booster.load_model(model_file)
+        from owfd.inference.predictor import load_booster
+
+        self.booster = load_booster(model_file)
         self.booster.set_param({"nthread": 1})  # one window at a time: avoid thread start-up
         self.features: list[str] = list(features)
 

@@ -105,18 +105,20 @@ class JsonFormatter(logging.Formatter):
 
 
 def latest_bundle(settings: Settings) -> Path:
-    """The configured bundle, or the newest one under ``artifacts/serving``."""
+    """The configured bundle, else the newest under ``artifacts/serving``, else the committed
+    production bundle in ``deploy/bundle``."""
     if settings.serving_bundle is not None:
         return settings.resolve(settings.serving_bundle)
     root = settings.resolve(settings.artifacts_dir) / "serving"
     bundles = (
         sorted(p for p in root.glob("*") if (p / "manifest.json").exists()) if root.exists() else []
     )
-    if not bundles:
-        raise RuntimeError(
-            f"No serving bundle found under {root}; run python -m owfd.models.export"
-        )
-    return bundles[-1]
+    if bundles:
+        return bundles[-1]
+    committed = settings.resolve(Path("deploy/bundle"))
+    if (committed / "manifest.json").exists():
+        return committed
+    raise RuntimeError(f"No serving bundle found under {root}; run python -m owfd.models.export")
 
 
 class Service:
@@ -233,14 +235,21 @@ class Service:
 
         self.stop_demo()
         scenarios = load_demo(self.settings.resolve(self.settings.demo_dir), classes)
-        replay = Replay(scenarios, speed=speed, loop=loop)
+        # Batch: every `tick` seconds send `tick` seconds' worth per well (same speed, much
+        # less per-request overhead than one call per second).
+        tick = max(1, self.settings.demo_tick_s)
+        replay = Replay(scenarios, speed=speed * tick, loop=loop)
 
         async def sink(well_id: str, chunk: pd.DataFrame) -> None:
             await self.ingest(well_id, chunk)
 
-        self.demo_task = asyncio.create_task(run(replay, sink))
-        self.demo_info = {"wells": [s.well_id for s in scenarios], "speed": speed, "loop": loop,
-                          "started": pd.Timestamp.now(tz="UTC").isoformat()}  # fmt: skip
+        self.demo_task = asyncio.create_task(run(replay, sink, tick_s=tick))
+        self.demo_info = {
+            "wells": [s.well_id for s in scenarios],
+            "speed": speed,
+            "loop": loop,
+            "started": pd.Timestamp.now(tz="UTC").isoformat(),
+        }
         return self.demo_status()
 
     def stop_demo(self) -> dict[str, Any]:
@@ -330,6 +339,27 @@ class Service:
             logger.warning("Alert webhook failed: %s", exc)
 
 
+class RateLimiter:
+    """Fixed-window request limit per client IP (in memory, per process)."""
+
+    def __init__(self, per_minute: int) -> None:
+        self.per_minute = per_minute
+        self.windows: dict[str, tuple[int, int]] = {}
+
+    def allow(self, client: str, now: float | None = None) -> bool:
+        """Count a request; False once ``per_minute`` is exceeded within the current minute."""
+        if self.per_minute <= 0:
+            return True
+        minute = int((now if now is not None else time.time()) // 60)
+        start, count = self.windows.get(client, (minute, 0))
+        if start != minute:
+            start, count = minute, 0
+        self.windows[client] = (start, count + 1)
+        if len(self.windows) > 10_000:  # forget old clients
+            self.windows = {k: v for k, v in self.windows.items() if v[0] == minute}
+        return count < self.per_minute
+
+
 def get_service(request: Request) -> Service:
     """The application's :class:`Service` (FastAPI dependency)."""
     svc: Service = request.app.state.service
@@ -386,6 +416,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    limiter = RateLimiter(settings.rate_limit_per_min)
+
+    @app.middleware("http")
+    async def rate_limit(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        if request.method == "POST":
+            forwarded = request.headers.get("x-forwarded-for", "")
+            client = forwarded.split(",")[0].strip() or (
+                request.client.host if request.client else "?"
+            )
+            if not limiter.allow(client):
+                body = {
+                    "error": {
+                        "code": "rate_limited",
+                        "message": "too many requests",
+                        "request_id": "",
+                    }
+                }
+                return JSONResponse(status_code=429, content=body, headers={"Retry-After": "60"})
+        return await call_next(request)
 
     @app.middleware("http")
     async def request_id(

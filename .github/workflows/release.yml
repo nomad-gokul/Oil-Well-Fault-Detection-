@@ -1,15 +1,11 @@
 name: Release
 
-# Publishing a GitHub Release builds and pushes the images. Attach the serving bundle to the
-# release first:  make bundle-tarball  ->  upload build/serving-bundle.tar.gz as a release asset.
+# Publishing a GitHub Release (or running this workflow by hand) builds the images with the
+# production model committed in deploy/bundle and pushes them to GitHub Container Registry.
 on:
   release:
     types: [published]
   workflow_dispatch:
-    inputs:
-      tag:
-        description: Release tag whose serving-bundle.tar.gz to use
-        required: true
 
 permissions:
   contents: read
@@ -20,16 +16,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      TAG: ${{ github.event.release.tag_name || format('manual-{0}', github.run_number) }}
     steps:
       - uses: actions/checkout@v4
-      - name: Download the serving bundle from the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release download "$TAG" --pattern serving-bundle.tar.gz --dir build
-          mkdir -p build/bundle && tar -xzf build/serving-bundle.tar.gz -C build/bundle
-          cat build/bundle/manifest.json | head -c 300
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:

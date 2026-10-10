@@ -81,12 +81,14 @@ class Settings(BaseSettings):
     # Serving (Tasks 13-14). All can be set with OWFD_* environment variables.
     serving_bundle: Path | None = None  # default: newest folder in artifacts/serving
     api_key: str | None = None  # when set, write endpoints require the X-API-Key header
+    rate_limit_per_min: int = 600  # per client IP on POST endpoints; 0 disables
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:8501"])
     database_url: str = "sqlite:///data/owfd.db"
     alert_webhook_url: str | None = None  # Slack/Discord-compatible webhook for new alerts
     alerts_file: Path = Path("configs/alerts.yaml")
     demo_mode: bool = False  # replay the bundled demo wells on startup (public demo)
     demo_speed: int = 60  # demo replay speed (x real time)
+    demo_tick_s: int = 5  # the demo sends readings in batches every this many seconds
     demo_dir: Path = Path("demo_data")
     log_level: str = "INFO"
 

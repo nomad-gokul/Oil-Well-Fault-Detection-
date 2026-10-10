@@ -6,6 +6,14 @@ controls).
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+try:  # running from a plain checkout (e.g. Streamlit Community Cloud): make src/ importable
+    import owfd  # noqa: F401
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
 import httpx
 import numpy as np
 import pandas as pd
@@ -13,7 +21,12 @@ import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
 
-from owfd.dashboard.client import ApiUnavailableError, Client, display_units, well_status
+from owfd.dashboard.client import (  # noqa: E402
+    ApiUnavailableError,
+    Client,
+    display_units,
+    well_status,
+)
 
 st.set_page_config(page_title="Oil Well Fault Detection", page_icon="🛢️", layout="wide")
 

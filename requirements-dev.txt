@@ -143,6 +143,10 @@ protobuf==7.36.2
     # via onnxruntime
 psutil==7.2.2
     # via locust
+psycopg==3.3.6
+    # via owfd (pyproject.toml)
+psycopg-binary==3.3.6
+    # via psycopg
 pyarrow==26.0.0
     # via owfd (pyproject.toml)
 pydantic==2.14.0
@@ -212,6 +216,7 @@ typing-extensions==4.16.0
     #   locust
     #   mypy
     #   opentelemetry-api
+    #   psycopg
     #   pydantic
     #   pydantic-core
     #   sqlalchemy

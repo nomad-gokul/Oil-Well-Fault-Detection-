@@ -5,6 +5,7 @@ SQLite, one uvicorn worker. Load generator: `tests/load/locustfile.py` (Locust),
 **same 4 cores** as the API, so these are pessimistic.
 
     make serve
+    OWFD_RATE_LIMIT_PER_MIN=0 make serve   # the default limit (600 POST/min per IP) would throttle the test
     locust -f tests/load/locustfile.py --headless -u 60 -r 20 -t 60s --host http://localhost:8000
 
 ## Single requests (no load)

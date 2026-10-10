@@ -50,6 +50,20 @@ class Prediction:
         return d
 
 
+def load_booster(path: Path) -> Any:
+    """Load an XGBoost model from ``.json``/``.ubj``, or a gzipped ``.json.gz``."""
+    import gzip
+
+    import xgboost as xgb
+
+    booster = xgb.Booster()
+    if path.suffix == ".gz":
+        booster.load_model(bytearray(gzip.decompress(path.read_bytes())))
+    else:
+        booster.load_model(path)
+    return booster
+
+
 def _mean_or_nan(total: np.ndarray, count: np.ndarray) -> np.ndarray:
     """Element-wise ``total / count`` as float32, NaN where ``count`` is 0."""
     with np.errstate(invalid="ignore", divide="ignore"):
@@ -81,10 +95,7 @@ class Predictor:
         self._members: list[tuple[str, Any, dict[str, Any]]] = []
         for member in self.manifest["members"]:
             if member["kind"] == "xgb":
-                import xgboost as xgb
-
-                booster = xgb.Booster()
-                booster.load_model(bundle / member["file"])
+                booster = load_booster(bundle / member["file"])
                 cols = [self._all_features.index(f) for f in member["features"]]
                 self._members.append(("xgb", booster, {**member, "cols": cols}))
             elif member["kind"] == "onnx":

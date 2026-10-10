@@ -156,10 +156,15 @@ def test_alert_lifecycle_websocket_and_restart(bundle: Path, tmp_path: Path) -> 
         assert len(c.get("/alerts").json()) == 1
 
 
-def test_missing_bundle_fails_clearly(tmp_path: Path) -> None:
+def test_bundle_resolution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import owfd.config as config
+    from owfd.api.main import latest_bundle
+
     s = Settings(serving_bundle=None, artifacts_dir=tmp_path, database_url="sqlite:///:memory:")
-    with pytest.raises(RuntimeError, match="No serving bundle"), TestClient(create_app(s)):
-        pass
+    assert latest_bundle(s).parts[-2:] == ("deploy", "bundle")  # committed production bundle
+    monkeypatch.setattr(config, "PROJECT_ROOT", tmp_path)  # a checkout without deploy/bundle
+    with pytest.raises(RuntimeError, match="No serving bundle"):
+        latest_bundle(Settings(serving_bundle=None, artifacts_dir=tmp_path))
 
 
 def test_readings_endpoint(client: TestClient) -> None:
@@ -225,3 +230,24 @@ def test_metrics_and_drift(bundle: Path, tmp_path: Path) -> None:
         (bundle / "reference.json").unlink()
     with TestClient(create_app(settings(bundle, tmp_path / "db2.sqlite"))) as c:
         assert c.get("/monitoring/drift").status_code == 404  # bundle without reference
+
+
+def test_rate_limiter_window() -> None:
+    from owfd.api.main import RateLimiter
+
+    rl = RateLimiter(2)
+    assert rl.allow("a", now=0) and rl.allow("a", now=1) and not rl.allow("a", now=2)
+    assert rl.allow("b", now=2)  # per client
+    assert rl.allow("a", now=61)  # new minute
+    assert all(RateLimiter(0).allow("a", now=0) for _ in range(100))  # disabled
+
+
+def test_rate_limit_returns_429(bundle: Path, tmp_path: Path) -> None:
+    s = settings(bundle, tmp_path / "db.sqlite", rate_limit_per_min=2)
+    with TestClient(create_app(s)) as c:
+        body = payload(raw_instance(300))
+        codes = [c.post("/predict", json=body).status_code for _ in range(3)]
+        assert codes == [200, 200, 429]
+        r = c.post("/predict", json=body, headers={"X-Forwarded-For": "203.0.113.9"})
+        assert r.status_code == 200  # another client
+        assert c.get("/health").status_code == 200  # reads are not limited

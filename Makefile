@@ -2,7 +2,7 @@ PYTHON ?= python3.11
 VENV ?= .venv
 BIN := $(VENV)/bin
 
-.PHONY: install install-all lint format test clean serve dashboard docker-bundle bundle-tarball up down
+.PHONY: install install-all lint format test clean serve dashboard publish-bundle up down
 
 $(BIN)/python:
 	$(PYTHON) -m venv $(VENV)
@@ -37,16 +37,11 @@ serve:  ## API on http://localhost:8000/docs (newest bundle in artifacts/serving
 dashboard:  ## Dashboard on http://localhost:8501
 	$(BIN)/streamlit run src/owfd/dashboard/app.py
 
-docker-bundle:  ## Copy the newest serving bundle to build/bundle for the API image
-	rm -rf build/bundle && mkdir -p build
-	cp -r "$$(ls -d artifacts/serving/*/ | sort | tail -1)" build/bundle
+publish-bundle:  ## Copy the newest artifacts/serving bundle to deploy/bundle (commit it)
+	$(BIN)/python scripts/publish_bundle.py
 
-up: docker-bundle  ## Build and start the stack (dashboard: http://localhost:8501)
+up:  ## Build and start the stack (dashboard: http://localhost:8501)
 	docker compose up -d --build --wait
 
 down:
 	docker compose down
-
-bundle-tarball: docker-bundle  ## build/serving-bundle.tar.gz, to attach to a GitHub Release
-	tar -czf build/serving-bundle.tar.gz -C build/bundle .
-	@echo "Attach build/serving-bundle.tar.gz to a GitHub Release to build and push the images."
