@@ -94,3 +94,28 @@ statistics used by XGBoost transfer across wells far better than learned filters
 per-well normalisation learned from the first hours of each stream, or domain-adversarial
 training would be the next things to try. XGBoost remains the production model; the deep model
 and the comparison stay in the project as an honest negative result.
+
+## Explainability (Task 11)
+
+`python -m owfd.models.explain` computes exact TreeSHAP values natively in XGBoost
+(`pred_contribs`) on a class-balanced sample of test windows: [importance per class](figures/shap_importance_per_class.png),
+`docs/shap_importance.csv`. `Explainer.explain_window` returns the top 5 drivers of a single
+prediction in **33 ms** on one CPU thread (1,000 trees x 10 classes; target < 50 ms, tested), and
+the API attaches them to every alert. SHAP values are verified to add up to the model's raw
+output.
+
+**Do the drivers make physical sense?** Mostly, yes:
+
+| Class | Top drivers | Physical reading |
+|---|---|---|
+| Spurious Closure of DHSV | P-TPT / T-TPT drop vs baseline | the safety valve shuts, flow and heat stop reaching the tree |
+| Severe Slugging | std of P-PDG and T-TPT, P-PDG − P-TPT | large periodic pressure oscillations |
+| Flow Instability | P-MON-CKP mean and std, P-TPT range | unstable pressure upstream of the production choke |
+| Quick Restriction in PCK | P-MON-CKP min/max vs baseline | upstream choke pressure jumps when the choke closes |
+| Scaling in PCK | P-MON-CKP mean/max vs baseline | upstream pressure creeps up as deposits narrow the choke |
+| Hydrate in Production Line | P-TPT and T-JUS-CKP vs baseline | a blockage changes pressure and temperature along the line |
+| Hydrate in Service Line | QGL and P-JUS-CKGL (gas lift) | the service line is the gas-lift line |
+| Rapid Productivity Loss | P-PDG and T-JUS-CKP vs baseline | bottom-hole pressure rises, flowing temperature falls |
+
+Weaker: Abrupt Increase of BSW and Scaling in PCK also lean on absolute pressure levels
+(P-JUS-CKGL mean, P-PDG min), which are partly well-specific rather than physical.
