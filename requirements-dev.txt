@@ -52,17 +52,13 @@ idna==3.20
 iniconfig==2.3.1
     # via pytest
 joblib==1.6.0
-    # via
-    #   owfd (pyproject.toml)
-    #   scikit-learn
+    # via owfd (pyproject.toml)
 librt==0.16.0
     # via mypy
 mypy==2.4.0
     # via owfd (pyproject.toml)
 mypy-extensions==1.1.0
     # via mypy
-narwhals==2.27.1
-    # via scikit-learn
 nodeenv==1.11.0
     # via pre-commit
 numpy==2.4.6
@@ -70,7 +66,6 @@ numpy==2.4.6
     #   owfd (pyproject.toml)
     #   onnxruntime
     #   pandas
-    #   scikit-learn
     #   scipy
     #   xgboost
 nvidia-nccl-cu12==2.32.3
@@ -132,18 +127,14 @@ pyyaml==6.0.3
     #   uvicorn
 ruff==0.17.0
     # via owfd (pyproject.toml)
-scikit-learn==1.9.1
-    # via owfd (pyproject.toml)
 scipy==1.17.1
-    # via
-    #   scikit-learn
-    #   xgboost
+    # via xgboost
 six==1.17.0
     # via python-dateutil
+sqlalchemy==2.1.4
+    # via owfd (pyproject.toml)
 starlette==1.7.0
     # via fastapi
-threadpoolctl==3.7.0
-    # via scikit-learn
 tomli==2.5.0
     # via coverage
 types-pyyaml==6.0.12.20260906
@@ -156,6 +147,7 @@ typing-extensions==4.16.0
     #   opentelemetry-api
     #   pydantic
     #   pydantic-core
+    #   sqlalchemy
     #   starlette
     #   typing-inspection
 typing-inspection==0.4.4

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -13,7 +14,17 @@ from pydantic_settings import (
     YamlConfigSettingsSource,
 )
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+def _project_root() -> Path:
+    """Folder holding ``configs/`` etc.: ``OWFD_PROJECT_ROOT``, else the source checkout, else
+    the working directory (e.g. when the package is installed into a container)."""
+    if env := os.environ.get("OWFD_PROJECT_ROOT"):
+        return Path(env).resolve()
+    checkout = Path(__file__).resolve().parents[2]
+    return checkout if (checkout / "configs").is_dir() else Path.cwd()
+
+
+PROJECT_ROOT = _project_root()
 DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "default.yaml"
 
 
@@ -66,6 +77,17 @@ class Settings(BaseSettings):
     split: SplitConfig = Field(default_factory=SplitConfig)
     splits_file: Path = Path("configs/splits.json")
     baseline_s: int = 3600
+
+    # Serving (Tasks 13-14). All can be set with OWFD_* environment variables.
+    serving_bundle: Path | None = None  # default: newest folder in artifacts/serving
+    api_key: str | None = None  # when set, write endpoints require the X-API-Key header
+    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:8501"])
+    database_url: str = "sqlite:///data/owfd.db"
+    alert_webhook_url: str | None = None  # Slack/Discord-compatible webhook for new alerts
+    alerts_file: Path = Path("configs/alerts.yaml")
+    demo_mode: bool = False  # replay the bundled demo wells on startup (public demo)
+    demo_speed: int = 60  # demo replay speed (x real time)
+    demo_dir: Path = Path("demo_data")
 
     @classmethod
     def settings_customise_sources(

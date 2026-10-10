@@ -40,9 +40,28 @@ def stuck_mask(series: pd.Series, stuck_after_s: int) -> pd.Series:
     Causal: the first ``stuck_after_s - 1`` samples of a flat run are still trusted, because
     online we cannot know yet that the sensor is stuck. NaNs are never flagged.
     """
-    run_id = series.ne(series.shift()).cumsum()
-    run_length = series.groupby(run_id).cumcount() + 1
-    return (run_length >= stuck_after_s) & series.notna()
+    v = series.to_numpy(dtype=np.float64)
+    return pd.Series(_stuck(v, stuck_after_s), index=series.index)
+
+
+def _stuck(v: np.ndarray, stuck_after_s: int) -> np.ndarray:
+    """NumPy core of :func:`stuck_mask` (NaN never equals NaN, so NaNs never form a run)."""
+    pos = np.arange(len(v))
+    starts = np.ones(len(v), dtype=bool)
+    starts[1:] = ~(v[1:] == v[:-1])
+    run_length = pos - np.maximum.accumulate(np.where(starts, pos, 0)) + 1
+    return (run_length >= stuck_after_s) & ~np.isnan(v)
+
+
+def _ffill(v: np.ndarray, limit: int) -> np.ndarray:
+    """Forward-fill NaNs from the last valid value, at most ``limit`` in a row (as pandas)."""
+    pos = np.arange(len(v))
+    valid = ~np.isnan(v)
+    last = np.maximum.accumulate(np.where(valid, pos, -1))
+    fill = ~valid & (last >= 0) & (pos - last <= limit)
+    out = v.copy()
+    out[fill] = v[last[fill]]
+    return out
 
 
 def clean_instance(df: pd.DataFrame, config: PreprocessingConfig) -> pd.DataFrame:
@@ -52,13 +71,18 @@ def clean_instance(df: pd.DataFrame, config: PreprocessingConfig) -> pd.DataFram
     and the label column if present. No fitted state, so it is safe before the train/test split.
     """
     out = select_variables(df, config.variables)
-    for var in config.variables:
-        col = out[var]
-        col = col.mask(stuck_mask(col, config.stuck_after_s))
-        out[var] = col.ffill(limit=config.ffill_limit_s)
-    masks = {mask_column(v): out[v].isna() for v in config.variables}
-    sensors = out[config.variables].astype("float32")
-    parts = [sensors, pd.DataFrame(masks, index=out.index)]
+    values = np.array(out[config.variables], dtype=np.float64)  # writable copy
+    for j in range(values.shape[1]):
+        col = values[:, j]
+        col = np.where(_stuck(col, config.stuck_after_s), np.nan, col)
+        values[:, j] = _ffill(col, config.ffill_limit_s)
+    missing = np.isnan(values)
+    with np.errstate(over="ignore"):  # 3W placeholders (~1e42) overflow to inf; clipped later
+        sensors = pd.DataFrame(values.astype(np.float32), index=out.index, columns=config.variables)
+    masks = pd.DataFrame(
+        missing, index=out.index, columns=[mask_column(v) for v in config.variables]
+    )
+    parts = [sensors, masks]
     if LABEL_COLUMN in out.columns:
         parts.append(out[[LABEL_COLUMN]])
     return pd.concat(parts, axis=1)

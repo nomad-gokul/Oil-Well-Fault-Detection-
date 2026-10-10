@@ -108,3 +108,33 @@ def test_preprocess_all_writes_and_skips(tiny_dataset: Path, tmp_path: Path) -> 
     assert preprocess_all(index, tiny_dataset, dst, CFG, workers=2) == 0  # already done
     out = pd.read_parquet(dst / index.loc[0, "path"])
     assert set(CFG.variables) <= set(out.columns)
+
+
+def _reference_clean(df: pd.DataFrame, cfg: PreprocessingConfig) -> pd.DataFrame:
+    """The original pandas implementation, kept as the specification."""
+    out = select_variables(df, cfg.variables)
+    for var in cfg.variables:
+        col = out[var]
+        run_id = col.ne(col.shift()).cumsum()
+        stuck = (col.groupby(run_id).cumcount() + 1 >= cfg.stuck_after_s) & col.notna()
+        out[var] = col.mask(stuck).ffill(limit=cfg.ffill_limit_s)
+    masks = {mask_column(v): out[v].isna() for v in cfg.variables}
+    parts = [out[cfg.variables].astype("float32"), pd.DataFrame(masks, index=out.index)]
+    if "class" in out.columns:
+        parts.append(out[["class"]])
+    return pd.concat(parts, axis=1)
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_numpy_cleaning_equals_pandas_reference(seed: int) -> None:
+    rng = np.random.default_rng(seed)
+    n = 3000
+    df = make_instance([0] * n, seed=seed)
+    for var in CFG.variables[:3]:
+        v = rng.integers(0, 4, n).astype(float)  # few distinct values -> many repeats
+        v[rng.random(n) < 0.15] = np.nan
+        v[500:520] = np.nan  # a gap longer than the forward-fill limit
+        v[1000:1010] = 7.0  # a flat run
+        df[var] = v
+    cfg = CFG.model_copy(update={"stuck_after_s": 5, "ffill_limit_s": 3})
+    pd.testing.assert_frame_equal(clean_instance(df, cfg), _reference_clean(df, cfg))
