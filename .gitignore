@@ -1,0 +1,27 @@
+# Data and model artifacts (never committed)
+/data/
+/artifacts/
+/mlruns/
+mlflow.db
+*.ckpt
+*.onnx
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Env and editors
+.env
+.ipynb_checkpoints/
+.vscode/
+.idea/
+.DS_Store

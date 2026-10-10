@@ -1,0 +1,16 @@
+# XGBoost baseline (Task 7). Multiclass over event classes 0..9 at the window end.
+# Validation loss is a poor stopping signal across wells (it bottoms out after ~16 trees while
+# macro F1 keeps improving), so the tree count is chosen by validation macro F1 instead.
+model:
+  n_estimators: 1000          # trees trained; the best prefix is kept
+  learning_rate: 0.05
+  max_depth: 4
+  min_child_weight: 20
+  subsample: 0.8
+  colsample_bytree: 0.6
+  reg_lambda: 1.0
+  tree_method: hist
+  max_bin: 256
+select_every: 50              # evaluate validation macro F1 every N trees
+class_weight_cap: 30.0        # max ratio between the largest and smallest class weight
+n_jobs: 4

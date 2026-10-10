@@ -1,0 +1,30 @@
+# Default project settings. Any key can be overridden by an env var prefixed OWFD_
+# (e.g. OWFD_RANDOM_SEED=7, OWFD_RAW_DATA_DIR=/mnt/3w).
+raw_data_dir: data/raw
+# Folder holding the 3W class folders 0..9 (set by `python -m owfd.data.download`).
+dataset_dir: data/raw/3W/dataset
+processed_data_dir: data/processed
+artifacts_dir: artifacts
+random_seed: 42
+
+# Cleaning and scaling (Task 4). Choices are explained in docs/data_report.md, "Decisions".
+preprocessing:
+  variables: [P-PDG, P-TPT, T-TPT, P-MON-CKP, T-JUS-CKP, P-JUS-CKGL, QGL]
+  ffill_limit_s: 60          # forward-fill NaN runs up to this many seconds
+  stuck_after_s: 1800        # a value unchanged this long is treated as a stuck sensor (missing)
+  clip_quantiles: [0.001, 0.999]  # robust clipping bounds, fit on training data
+  scaler_sample_every_s: 10  # row subsampling when fitting the scaler
+
+# Windowing and splits (Task 5).
+windows:
+  window_s: 300              # 5-minute windows at 1 Hz
+  stride_s: 60               # one window per minute
+  max_train_windows_per_instance: 300  # caps multi-day instances in training only
+split:
+  val_frac: 0.15             # share of real instances
+  test_frac: 0.20
+  n_trials: 20000            # random well assignments searched
+# Per-instance (per-well stream) baseline: running mean of each sensor over the first
+# `baseline_s` seconds, computed causally (only data up to the window end). Used for
+# "deviation from this well's normal level" features.
+baseline_s: 3600
