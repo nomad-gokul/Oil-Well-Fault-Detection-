@@ -6,3 +6,11 @@ dataset_dir: data/raw/3W/dataset
 processed_data_dir: data/processed
 artifacts_dir: artifacts
 random_seed: 42
+
+# Cleaning and scaling (Task 4). Choices are explained in docs/data_report.md, "Decisions".
+preprocessing:
+  variables: [P-PDG, P-TPT, T-TPT, P-MON-CKP, T-JUS-CKP, P-JUS-CKGL, QGL]
+  ffill_limit_s: 60          # forward-fill NaN runs up to this many seconds
+  stuck_after_s: 1800        # a value unchanged this long is treated as a stuck sensor (missing)
+  clip_quantiles: [0.001, 0.999]  # robust clipping bounds, fit on training data
+  scaler_sample_every_s: 10  # row subsampling when fitting the scaler

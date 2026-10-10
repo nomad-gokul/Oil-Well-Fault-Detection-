@@ -5,6 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import BaseModel, Field
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -16,11 +17,27 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "default.yaml"
 
 
+class PreprocessingConfig(BaseModel):
+    """Cleaning and scaling options (see ``configs/default.yaml``)."""
+
+    variables: list[str] = Field(
+        default=["P-PDG", "P-TPT", "T-TPT", "P-MON-CKP", "T-JUS-CKP", "P-JUS-CKGL", "QGL"]
+    )
+    ffill_limit_s: int = 60
+    stuck_after_s: int = 1800
+    clip_quantiles: tuple[float, float] = (0.001, 0.999)
+    scaler_sample_every_s: int = 10
+
+
 class Settings(BaseSettings):
     """Paths and global settings. Env vars (``OWFD_*``) take precedence over the YAML file."""
 
     model_config = SettingsConfigDict(
-        env_prefix="OWFD_", env_file=".env", extra="ignore", yaml_file=DEFAULT_CONFIG
+        env_prefix="OWFD_",
+        env_nested_delimiter="__",
+        env_file=".env",
+        extra="ignore",
+        yaml_file=DEFAULT_CONFIG,
     )
 
     raw_data_dir: Path = Path("data/raw")
@@ -28,6 +45,7 @@ class Settings(BaseSettings):
     processed_data_dir: Path = Path("data/processed")
     artifacts_dir: Path = Path("artifacts")
     random_seed: int = 42
+    preprocessing: PreprocessingConfig = Field(default_factory=PreprocessingConfig)
 
     @classmethod
     def settings_customise_sources(
