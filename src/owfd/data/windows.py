@@ -170,6 +170,35 @@ def build_split(
     return table
 
 
+def add_deviation_channels(x: np.ndarray, baseline: np.ndarray) -> np.ndarray:
+    """Append "sensor minus stream baseline" channels (0 where the baseline is unknown).
+
+    ``x`` is [n, t, 2k] (k sensors then k masks); returns [n, t, 3k].
+    """
+    k = baseline.shape[1]
+    dev = x[:, :, :k] - np.nan_to_num(baseline, nan=0.0)[:, None, :]
+    dev = np.where(np.isnan(baseline)[:, None, :], 0.0, dev)
+    return np.concatenate([x, dev.astype(np.float32)], axis=2)
+
+
+def relative_channels(x: np.ndarray, baseline: np.ndarray) -> np.ndarray:
+    """Well-independent model input: no absolute sensor levels.
+
+    ``x`` is [n, t, 2k] (k scaled sensors then k masks), ``baseline`` [n, k]. Returns
+    [n, t, 3k]: each sensor minus its window mean (shape), the masks, and each sensor minus the
+    stream baseline (deviation from this well's normal level; 0 where the baseline is unknown).
+    """
+    k = baseline.shape[1]
+    v = x[:, :, :k]
+    centered = v - v.mean(axis=1, keepdims=True)
+    known = ~np.isnan(baseline)[:, None, :]
+    dev = np.where(known, v - np.nan_to_num(baseline, nan=0.0)[:, None, :], 0.0)
+    return np.concatenate([centered, x[:, :, k:], dev], axis=2).astype(np.float32)
+
+
+INPUT_MODES = {"absolute": add_deviation_channels, "relative": relative_channels}
+
+
 class WindowStore:
     """Read-only access to one split's windows: ``store.x(i)`` -> [window_s, n_channels]."""
 
