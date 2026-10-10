@@ -2,7 +2,7 @@ PYTHON ?= python3.11
 VENV ?= .venv
 BIN := $(VENV)/bin
 
-.PHONY: install install-all lint format test clean serve dashboard docker-bundle up down
+.PHONY: install install-all lint format test clean serve dashboard docker-bundle bundle-tarball up down
 
 $(BIN)/python:
 	$(PYTHON) -m venv $(VENV)
@@ -46,3 +46,7 @@ up: docker-bundle  ## Build and start the stack (dashboard: http://localhost:850
 
 down:
 	docker compose down
+
+bundle-tarball: docker-bundle  ## build/serving-bundle.tar.gz, to attach to a GitHub Release
+	tar -czf build/serving-bundle.tar.gz -C build/bundle .
+	@echo "Attach build/serving-bundle.tar.gz to a GitHub Release to build and push the images."

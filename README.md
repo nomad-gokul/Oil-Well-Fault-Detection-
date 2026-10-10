@@ -1,5 +1,7 @@
 # Oil Well Fault Detection System
 
+[![CI](https://github.com/nomad-gokul/Oil-Well-Fault-Detection-/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/nomad-gokul/Oil-Well-Fault-Detection-/actions/workflows/ci.yml)
+
 An ML early-warning system that detects operational faults in offshore oil wells from real
 sensor time-series ([Petrobras 3W dataset](https://github.com/petrobras/3W)). Models
 (XGBoost and a PyTorch sequence model) are served through a FastAPI service and a live
