@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     )
 
     raw_data_dir: Path = Path("data/raw")
+    dataset_dir: Path = Path("data/raw/3W/dataset")
     processed_data_dir: Path = Path("data/processed")
     artifacts_dir: Path = Path("artifacts")
     random_seed: int = 42
