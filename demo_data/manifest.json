@@ -1,0 +1,77 @@
+{
+ "description": "Demo scenarios cut from held-out TEST instances of the Petrobras 3W dataset (CC BY 4.0, https://github.com/petrobras/3W). Built by `python -m owfd.simulator.make_demo`; see that module for the selection rule.",
+ "split": "test",
+ "max_hours": 6.0,
+ "scenarios": [
+  {
+   "well_id": "demo-0-normal",
+   "event_class": 0,
+   "file": "0-normal.npz",
+   "source": "0/WELL-00006_20170507020249",
+   "rows": 14316
+  },
+  {
+   "well_id": "demo-1-bsw",
+   "event_class": 1,
+   "file": "1-bsw.npz",
+   "source": "1/WELL-00006_20180617190257",
+   "rows": 21600
+  },
+  {
+   "well_id": "demo-2-dhsv",
+   "event_class": 2,
+   "file": "2-dhsv.npz",
+   "source": "2/WELL-00003_20180206171508",
+   "rows": 10829
+  },
+  {
+   "well_id": "demo-3-slugging",
+   "event_class": 3,
+   "file": "3-slugging.npz",
+   "source": "3/WELL-00014_20170920050228",
+   "rows": 7200
+  },
+  {
+   "well_id": "demo-4-instability",
+   "event_class": 4,
+   "file": "4-instability.npz",
+   "source": "4/WELL-00004_20140806010107",
+   "rows": 7200
+  },
+  {
+   "well_id": "demo-5-prod-loss",
+   "event_class": 5,
+   "file": "5-prod-loss.npz",
+   "source": "5/WELL-00020_20140318135038",
+   "rows": 15325
+  },
+  {
+   "well_id": "demo-6-pck-restriction",
+   "event_class": 6,
+   "file": "6-pck-restriction.npz",
+   "source": "6/WELL-00004_20171031181500",
+   "rows": 5604
+  },
+  {
+   "well_id": "demo-7-pck-scaling",
+   "event_class": 7,
+   "file": "7-pck-scaling.npz",
+   "source": "7/WELL-00006_20180618103000",
+   "rows": 21600
+  },
+  {
+   "well_id": "demo-8-hydrate-prod",
+   "event_class": 8,
+   "file": "8-hydrate-prod.npz",
+   "source": "8/WELL-00032_20110830235321",
+   "rows": 21600
+  },
+  {
+   "well_id": "demo-9-hydrate-service",
+   "event_class": 9,
+   "file": "9-hydrate-service.npz",
+   "source": "9/WELL-00014_20170214190000",
+   "rows": 21600
+  }
+ ]
+}
