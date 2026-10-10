@@ -1,0 +1,6 @@
+# Default project settings. Any key can be overridden by an env var prefixed OWFD_
+# (e.g. OWFD_RANDOM_SEED=7, OWFD_RAW_DATA_DIR=/mnt/3w).
+raw_data_dir: data/raw
+processed_data_dir: data/processed
+artifacts_dir: artifacts
+random_seed: 42
