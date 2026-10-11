@@ -1,10 +1,7 @@
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 import pytest
 
-from owfd.features.build import META_COLUMNS, build_features
 from owfd.features.stats import REL_STATS, STATS, feature_names, window_features
 
 VARS = ["P-PDG", "P-TPT", "T-TPT"]
@@ -94,27 +91,23 @@ def test_relative_features_use_the_baseline() -> None:
     assert np.isnan(f["T-TPT__mean_rel"])  # unknown baseline
 
 
-class FakeStore:
-    def __init__(self, x: np.ndarray) -> None:
-        self._x = x
-        self.windows = pd.DataFrame({c: range(len(x)) for c in META_COLUMNS})
+def test_instance_features_chunk_consistently_and_match_window_features() -> None:
+    from owfd.data.clean import mask_column
+    from owfd.features.build import instance_features
+    from owfd.features.context import all_feature_names
 
-    def __len__(self) -> int:
-        return len(self._x)
-
-    def batch(self, idx: np.ndarray) -> np.ndarray:
-        return self._x[idx]
-
-    def baselines(self, idx: np.ndarray) -> np.ndarray:
-        return np.zeros((len(idx), len(VARS)), np.float32)
-
-
-def test_build_features_chunks_consistently(tmp_path: Path) -> None:
     rng = np.random.default_rng(2)
-    x = rng.normal(size=(10, T, 2 * len(VARS))).astype(np.float32)
-    x[:, :, len(VARS) :] = 0
-    store = FakeStore(x)
-    a = build_features(store, VARS, chunk=3)  # type: ignore[arg-type]
-    b = build_features(store, VARS, chunk=100)  # type: ignore[arg-type]
-    pd.testing.assert_frame_equal(a, b)
-    assert list(a.columns) == META_COLUMNS + feature_names(VARS)
+    n = 3000
+    df = pd.DataFrame(rng.normal(size=(n, len(VARS))).astype(np.float32), columns=VARS)
+    for v in VARS:
+        df[mask_column(v)] = False
+    ends = np.arange(T - 1, n, 60)
+    a = instance_features(df, ends, VARS, T, baseline_s=600, chunk=7)
+    b = instance_features(df, ends, VARS, T, baseline_s=600, chunk=1000)
+    np.testing.assert_array_equal(a, b)
+    assert a.shape == (len(ends), len(all_feature_names(VARS)))
+    # The first columns are the window statistics of the float16-rounded window.
+    x16 = df.to_numpy(np.float16).astype(np.float32)[ends[-1] - T + 1 : ends[-1] + 1]
+    base = df[VARS].to_numpy(np.float64)[:600].mean(axis=0).astype(np.float32)
+    short = window_features(x16[None], VARS, base[None])[0]
+    np.testing.assert_allclose(a[-1, : len(short)], short, rtol=1e-6)

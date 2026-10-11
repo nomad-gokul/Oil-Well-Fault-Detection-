@@ -65,9 +65,15 @@ def sidebar() -> dict | None:
         api_down(exc)
         return None
     st.sidebar.success(f"API online · model `{health['model']}` · v{health['model_version']}")
+    rule = model["alert"]
+    per_well = (
+        " (raised per well after a one-hour burn-in)"
+        if rule.get("burnin_quantile") is not None
+        else ""
+    )
     st.sidebar.caption(
-        f"Alert when P(fault) > {model['alert']['threshold']:.2f} for "
-        f"{int(model['alert']['k'])} consecutive minutes"
+        f"Alert when P(fault) > {rule['threshold']:.2f}{per_well} for "
+        f"{int(rule['k'])} consecutive minutes"
     )
     st.sidebar.divider()
     st.sidebar.subheader("Demo replay")

@@ -104,7 +104,45 @@ def test_serving_features_equal_training_store_features(bundle: Path, tmp_path: 
     train_feats = p.xgb_features(store.batch(np.array([i])), store.baselines(np.array([i])))
     serving = p.predict_window(raw.iloc[: end + 1], keep_inputs=True)
     assert serving.inputs is not None
-    x, base = serving.inputs
+    x, base, blocks = serving.inputs
     x16 = x.astype(np.float16).astype(np.float32)
-    serve_feats = p.xgb_features(x16[None], base[None])
+    serve_feats = p.xgb_features(x16[None], base[None], blocks[None])
     np.testing.assert_allclose(serve_feats, train_feats, rtol=1e-5, atol=1e-5)
+
+
+@pytest.fixture(scope="module")
+def context_bundle(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return build_bundle(tmp_path_factory.mktemp("ctx_bundle"), context=True)
+
+
+@pytest.mark.parametrize("chunk_seed", [0, 1])
+def test_streaming_context_features_equal_training_features(
+    context_bundle: Path, chunk_seed: int
+) -> None:
+    """Long-context features online (one block per minute, bounded buffer) must equal the
+    training pipeline's (whole instance at once, owfd.features.build)."""
+    from owfd.features.build import instance_features
+    from owfd.features.context import MAX_BLOCKS
+
+    p = Predictor.load(context_bundle)
+    assert p.uses_context
+    raw = raw_instance(n=W + 60 * (MAX_BLOCKS + 40), seed=4)
+    scaled = p.scaler.transform(clean_instance(raw, PRE))
+    ends = np.arange(W - 1, len(raw), STRIDE)
+    expected = instance_features(scaled, ends, VARS, W, BASE_S)
+    cols = [p._all_features.index(f) for f in p.manifest["members"][0]["features"]]
+
+    stream = StreamingPredictor(p)
+    rng = np.random.default_rng(chunk_seed)
+    got, lo = [], 0
+    while lo < len(raw):
+        n = int(rng.integers(1, 900))
+        got += stream.update("w", raw.iloc[lo : lo + n], keep_inputs=True)
+        lo += n
+    assert [g.timestamp for g in got] == list(raw.index[ends])
+    feats = np.concatenate([p.xgb_features(*(a[None] for a in g.inputs)) for g in got])
+    np.testing.assert_allclose(feats, expected[:, cols], rtol=1e-5, atol=1e-5, equal_nan=True)
+    assert not np.isnan(feats[-1]).all() and len(stream.wells["w"].blocks) == MAX_BLOCKS
+    # Same probabilities as scoring the training features directly.
+    single = p.predict_window(raw, well_id="w")
+    np.testing.assert_allclose(single.probabilities, got[-1].probabilities, atol=1e-5)

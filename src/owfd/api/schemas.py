@@ -107,7 +107,7 @@ class ModelOut(BaseModel):
     variables: list[str]
     window_s: int
     stride_s: int
-    alert: dict[str, float]
+    alert: dict[str, float | None]
     metrics: dict[str, float | int | str | None]
 
 

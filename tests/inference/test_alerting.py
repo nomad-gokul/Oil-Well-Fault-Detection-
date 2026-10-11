@@ -104,3 +104,35 @@ def test_config_from_files(tmp_path: Path) -> None:
 @pytest.mark.parametrize("p", [0.0, 0.6])
 def test_values_at_or_below_threshold_never_open(p: float) -> None:
     assert run(AlertEngine(CFG), [p] * 20) == []
+
+
+def test_per_well_threshold_after_burnin() -> None:
+    cfg = AlertConfig(threshold=0.6, k=3, resolve_margin=0.1, resolve_after=4, cooldown_s=600,
+                      burnin_quantile=1.0, burnin_margin=0.05, burnin_windows=4)  # fmt: skip
+    eng = AlertEngine(cfg)
+    # Noisy well: burn-in (global threshold meanwhile) peaks at 0.58 -> 0.63 afterwards, so
+    # a run at 0.62 that would alert under the global 0.6 no longer does.
+    noisy = run(eng, [0.55, 0.58, 0.5, 0.55] + [0.62] * 6)
+    assert eng.threshold("w") == pytest.approx(0.63)
+    assert noisy == []
+    assert run(eng, [0.9] * 3, start=10)[-1] == (12, "opened")
+    # Quiet well keeps the global threshold (never lowered).
+    for i, p in enumerate([0.1, 0.2, 0.1, 0.1]):
+        eng.process(pred(i, p, well="quiet"))
+    assert eng.threshold("quiet") == 0.6
+    # The cap applies, and an unknown well uses the global threshold.
+    capped = AlertEngine(AlertConfig(threshold=0.6, k=1, burnin_quantile=1.0,
+                                     burnin_margin=0.5, burnin_windows=1))  # fmt: skip
+    capped.process(pred(0, 0.9))
+    assert capped.threshold("w") == 0.99 and capped.threshold("new") == 0.6
+
+
+def test_burnin_disabled_by_default(tmp_path: Path) -> None:
+    eng = AlertEngine(AlertConfig.from_files({"threshold": 0.6, "k": 3}, tmp_path / "none.yaml"))
+    run(eng, [0.99] * 100)
+    assert eng.threshold("w") == 0.6
+    cfg = AlertConfig.from_files(
+        {"threshold": 0.6, "k": 3, "burnin_quantile": 0.9, "burnin_margin": 0.05,
+         "burnin_windows": 56}, tmp_path / "none.yaml",
+    )  # fmt: skip
+    assert (cfg.burnin_quantile, cfg.burnin_margin, cfg.burnin_windows) == (0.9, 0.05, 56)
