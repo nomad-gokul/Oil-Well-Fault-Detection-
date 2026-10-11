@@ -333,7 +333,7 @@ def _with_p_fault(preds: pd.DataFrame, proba: np.ndarray) -> pd.DataFrame:
     return out
 
 
-def _plot_tradeoff(grids: dict[str, pd.DataFrame], path: Path) -> None:
+def _plot_tradeoff(grids: dict[str, pd.DataFrame], path: Path, on: str = "validation") -> None:
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots(figsize=(7, 4.5))
@@ -348,7 +348,7 @@ def _plot_tradeoff(grids: dict[str, pd.DataFrame], path: Path) -> None:
     ax.set_xlim(left=0)
     ax.set_ylim(0, 1.02)
     ax.set(
-        xlabel="false alarms per 24 h of normal operation (validation)",
+        xlabel=f"false alarms per 24 h of normal operation ({on})",
         ylabel="share of fault instances detected",
         title="Alert threshold trade-off",
     )
@@ -501,7 +501,8 @@ def main(argv: list[str] | None = None) -> None:
 
     figs = PROJECT_ROOT / "docs" / "figures"
     figs.mkdir(parents=True, exist_ok=True)
-    _plot_tradeoff(grids, figs / "alert_tradeoff.png")
+    on = "validation" if args.select_on == "val" else "cross-validation, 30 non-test wells"
+    _plot_tradeoff(grids, figs / "alert_tradeoff.png", on)
     _plot_reliability(curves, figs / "reliability.png")
     table.to_csv(PROJECT_ROOT / "docs" / "early_warning_comparison.csv")
     per_class = per_class_summary(reports[chosen])
@@ -517,6 +518,7 @@ def main(argv: list[str] | None = None) -> None:
         )  # fmt: skip
     serving = {
         "model": base_name,
+        "variant": chosen,
         "artifacts": [str(d.relative_to(PROJECT_ROOT)) for d in member_dirs],
         "temperature": float(table.loc[chosen, "temperature"]),
         "alert": alert,

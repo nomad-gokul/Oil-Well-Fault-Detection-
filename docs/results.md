@@ -18,6 +18,8 @@ present in each split. "Fault" metrics treat classes 1–9 as one class versus n
 | xgb_tuned | test | 0.433 | 0.505 | 0.811 | 0.857 | 0.810 | 133,627 |
 | xgb_osc | val | 0.488 | 0.555 | 0.737 | 0.501 | 0.424 | 41,673 |
 | xgb_osc | test | 0.463 | 0.509 | 0.799 | 0.840 | 0.755 | 133,627 |
+| xgb_ctx | val | 0.498 | 0.571 | 0.656 | 0.450 | 0.383 | 41,673 |
+| xgb_ctx | test | 0.464 | 0.507 | 0.852 | 0.898 | 0.800 | 133,627 |
 <!-- results:end -->
 
 ## XGBoost baseline (Task 7)
