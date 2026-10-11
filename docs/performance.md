@@ -16,6 +16,13 @@ SQLite, one uvicorn worker. Load generator: `tests/load/locustfile.py` (Locust),
 | `POST /predict` (300 readings, features + model + SHAP drivers) | **43 ms** |
 | Streaming update of one well with one reading (in-process) | 4.0 ms |
 
+### With the long-context model (237 features)
+
+Measured against the Docker image (`Dockerfile`, 1 worker) after the switch to the context
+model: `POST /predict` 28 ms median (p95 39 ms, 30 requests). A streaming update with 150 new
+readings (one demo tick) takes about 9 ms per well in process; the demo (10 wells at 30x)
+keeps the container near 0.2% of one core between ticks, with 178 MB of memory.
+
 ## 60 concurrent users for 60 s (48 wells streaming 1 reading/s, 12 analysts)
 
 | Endpoint | Requests | Failures | Median | p95 | p99 |

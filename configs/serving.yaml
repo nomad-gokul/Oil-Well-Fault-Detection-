@@ -1,9 +1,15 @@
 # Written by python -m owfd.models.evaluate
-model: xgb_tuned
+model: xgb_ctx
+variant: xgb_ctx + per-well threshold
 artifacts:
-- artifacts/xgb/xgb_tuned-20261010-232858
-temperature: 1.4563659151116708
+- artifacts/xgb/xgb_ctx-20261011-104834
+temperature: 1.8421058105461652
 alert:
   threshold: 0.85
   k: 5
-selected_on: 'validation: detection rate at <= 1.0 false alarms/24 h, then macro F1'
+  burnin_quantile: 0.9
+  burnin_margin: 0.1
+  max_threshold: 0.99
+  burnin_windows: 56
+selected_on: 'cross-validation predictions of all wells outside the test split: detection
+  rate at <= 1.0 false alarms/24 h, then fewer false alarms, then macro F1'

@@ -105,10 +105,9 @@ def build_bundle(
         import pandas as pd
 
         table = pd.read_csv(metrics_file, index_col="model")
-        if serving["model"] in table.index:
-            metrics = {
-                k: (None if pd.isna(v) else v) for k, v in table.loc[serving["model"]].items()
-            }
+        row = serving.get("variant", serving["model"])  # e.g. "<model> + per-well threshold"
+        if row in table.index:
+            metrics = {k: (None if pd.isna(v) else v) for k, v in table.loc[row].items()}
     manifest = {
         "version": out_dir.name,
         "created": datetime.now(UTC).isoformat(timespec="seconds"),

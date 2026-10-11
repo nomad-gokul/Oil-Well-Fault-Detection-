@@ -3,17 +3,18 @@
 ## Resume bullets
 
 - Built an ML early-warning system for **offshore oil well faults** on the Petrobras 3W dataset
-  (2,228 sensor time series, 40 wells, 10 event types): well-level, leak-free evaluation;
-  **XGBoost tuned with Optuna** reached fault-vs-normal **ROC-AUC 0.81** on wells never seen in
-  training and detected **56% of fault episodes with a 4-minute median delay**.
-- Engineered **baseline-relative features** (deviation from each well's own normal level) that
-  lifted cross-well macro F1 from 0.20 to 0.35 in a controlled comparison, and diagnosed why a
-  **PyTorch CNN** memorised training wells (validation F1 0.08), with SHAP explanations that
-  match the physics of each fault.
-- Shipped it as a **FastAPI** service (streaming ingestion, alert lifecycle, SHAP drivers per
-  alert, Prometheus metrics, fleet drift check) with a live **Streamlit** dashboard; 43 ms
-  inference, 0 failures under a 60-user load test, PyTorch-free 531 MB Docker image,
-  **GitHub Actions CI/CD** and 134 tests; deployed on Render + Streamlit Cloud.
+  (2,228 sensor time series, 40 wells, 10 event types) with leak-free, **well-level evaluation
+  and 5-fold cross-validation by well**; tuned **XGBoost** reached fault-vs-normal **ROC-AUC
+  0.85** on unseen wells and caught **52% of fault episodes at 1.8 false alarms/day** (4-minute
+  median delay, 100% of valve closures and hydrates).
+- Engineered **baseline-relative** and **30/120-minute context features** (trend, oscillation
+  period and strength) that added **6–8 points of detection at equal false-alarm rates across
+  all 40 wells**; diagnosed that the remaining misses are chronic flow instability on two wells,
+  and documented two negative results (a PyTorch CNN that memorised wells; per-well thresholds).
+- Shipped it as a **FastAPI** service (streaming ingestion with verified training/serving parity,
+  alert lifecycle, SHAP drivers per alert, Prometheus metrics, drift check) with a live
+  **Streamlit** dashboard; ~30 ms inference, Docker, **GitHub Actions CI/CD**, 151 tests;
+  deployed on Railway + Streamlit Cloud.
 
 ## Likely interview questions
 
@@ -44,9 +45,10 @@ windows per instance in training, and alert-level metrics that count fault *epis
 than windows.
 
 **6. How is the alert threshold chosen, and is it realistic?**
-On validation: the highest detection rate with at most 1 false alarm per day (P(fault) > 0.85
-for 5 consecutive minutes). On test wells it gives 2.9 false alarms/day, so false-alarm rates
-vary by well; in production I would re-tune per field after a burn-in period.
+On the cross-validation predictions of the 30 non-test wells: the highest detection rate with
+at most 1 false alarm per day (P(fault) > 0.85 for 5 consecutive minutes, raised per well after a
+one-hour burn-in). Choosing on the 7 validation wells alone did not transfer to the test wells,
+which is why selection moved to 30 wells. On test it gives 1.8 false alarms/day.
 
 **7. How do you make sure online predictions match offline ones?**
 The serving code reuses the training preprocessing, and tests stream instances in random chunk
@@ -62,10 +64,20 @@ same sensor, e.g. a unit change in the data pipeline. A single faulty well is an
 drift.
 
 **9. What are the biggest limitations?**
-Sim-to-real gap (severe slugging is learned from simulations only and detected 19% of the
-time), tiny test counts for rare classes, and class confusion during transients.
+Chronic flow instability on two wells (most of the misses across wells), the sim-to-real gap
+for severe slugging (31 of 32 real episodes come from one well), tiny counts for rare classes,
+and class confusion during transients.
 
 **10. How would you scale it to hundreds of wells?**
 Readings already come in per-well batches; partition wells across API workers (the streaming
 state is per well), move persistence to Postgres, and batch model calls across wells. The
 profiling-driven NumPy rewrite of preprocessing made a streamed reading 3.2x cheaper.
+
+
+**Follow-up: why is cross-validation so much lower than the test split?**
+The test split has 10 wells and happened to be easier than average. Across all 40 wells (5-fold
+CV by well, nested tuning, bootstrap intervals), about one in four fault episodes is caught at
+about one false alarm per day. 71% of all episodes are flow instability, mostly on two wells that
+are unstable from the first minute of every recording, so "deviation from this well's normal"
+has nothing to compare with. Excluding those, 55% are caught. Reporting both numbers, and why
+they differ, is more useful than quoting the best split.
