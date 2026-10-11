@@ -308,6 +308,25 @@ def _latest(root: Path, prefix: str) -> Path | None:
     return runs[-1] if runs else None
 
 
+def cv_replay(cv_dir: Path, exclude_wells: set[str]) -> Replay | None:
+    """Replay of the out-of-fold predictions written by ``owfd.models.cv`` (calibrated with a
+    temperature fitted on them), without ``exclude_wells``; None if there are none."""
+    if not (cv_dir / "oof.parquet").exists():
+        return None
+    proba = [f"p{c}" for c in range(10)]
+    oof = pd.read_parquet(cv_dir / "oof.parquet")
+    oof = oof[~oof["well_id"].isin(exclude_wells)]
+    t = fit_temperature(oof[proba].to_numpy(), oof["event_class"].to_numpy())
+    preds = _with_p_fault(oof, apply_temperature(oof[proba].to_numpy(), t))
+    burnin = None
+    if (cv_dir / "oof_burnin.parquet").exists():
+        b = pd.read_parquet(cv_dir / "oof_burnin.parquet")
+        b = b[~b["well_id"].isin(exclude_wells)].reset_index(drop=True)
+        p_burn = 1.0 - apply_temperature(b[proba].to_numpy(), t)[:, 0]
+        burnin = {str(i): p_burn[idx] for i, idx in b.groupby("instance_id").indices.items()}
+    return Replay(preds, burnin)
+
+
 def _with_p_fault(preds: pd.DataFrame, proba: np.ndarray) -> pd.DataFrame:
     out = preds[["instance_id", "end_time", "event_class", "is_transient"]].copy()
     out["p_fault"] = 1.0 - proba[:, 0]
@@ -377,6 +396,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--models", nargs="*", type=Path, help="artifact folders (default: latest)")
     parser.add_argument("--max-false-alarms", type=float, default=1.0, help="per 24 h (val)")
     parser.add_argument("--ensemble", action="store_true", help="also score the mean of all")
+    parser.add_argument(
+        "--select-on", choices=("val", "cv"), default="val",
+        help="tune the alert rule and pick the model on validation wells, or on the "
+        "cross-validation predictions (owfd.models.cv) of every well outside the test split",
+    )  # fmt: skip
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     log = logging.getLogger(__name__)
@@ -430,15 +454,25 @@ def main(argv: list[str] | None = None) -> None:
             p_burn = 1.0 - apply_temperature(b[PROBA].to_numpy(), t)[:, 0]
             burnin = {str(i): p_burn[idx] for i, idx in b.groupby("instance_id").indices.items()}
         replay_val, replay_test = Replay(val_preds, burnin), Replay(test_preds, burnin)
+        replay_sel = replay_val
+        if args.select_on == "cv":
+            from owfd.data.split import load_splits
+
+            test_wells = set(load_splits(settings.resolve(settings.splits_file))["wells"]["test"])
+            cv = cv_replay(artifacts / "cv" / name, test_wells)
+            if cv is None:
+                raise SystemExit(f"No cross-validation predictions for {name}: run owfd.models.cv")
+            replay_sel = cv
         variants = [(name, rule_grid(thresholds, ks))]
         if burnin is not None:
             variants.append((f"{name} + per-well threshold", per_well_rules))
         y_fault = (y_test > 0).astype(float)
         for variant, grid_rules in variants:
             rule, grids[variant] = tune_rule(
-                replay_val, max_false_alarms_per_day=args.max_false_alarms, rules=grid_rules
+                replay_sel, max_false_alarms_per_day=args.max_false_alarms, rules=grid_rules
             )
             rules[variant] = (name, rule)
+            sel_s = summarize(replay_sel.report(rule))
             val_s = summarize(replay_val.report(rule))
             reports[variant] = replay_test.report(rule)
             test_s = summarize(reports[variant])
@@ -453,14 +487,17 @@ def main(argv: list[str] | None = None) -> None:
                 "test_macro_f1": classification_metrics(y_test, cal["test"])["macro_f1"],
                 "threshold": rule.threshold, "k": rule.k,
                 "burnin_quantile": rule.burnin_quantile, "burnin_margin": rule.burnin_margin,
+                **{f"select_{k}": v for k, v in sel_s.items()},
                 **{f"val_{k}": v for k, v in val_s.items()},
                 **{f"test_{k}": v for k, v in test_s.items()},
             })  # fmt: skip
     table = pd.DataFrame(rows).set_index("model")
-    # Production choice on validation only: detection at the false-alarm budget, then fewer
-    # validation false alarms, then macro F1.
-    chosen = table.sort_values(["val_detection_rate", "val_false_alarms_per_day", "val_macro_f1"],
-                               ascending=[False, True, False]).index[0]  # fmt: skip
+    # Production choice without the test wells: detection at the false-alarm budget on the
+    # selection set (validation, or cross-validation), then fewer false alarms, then macro F1.
+    chosen = table.sort_values(
+        ["select_detection_rate", "select_false_alarms_per_day", "val_macro_f1"],
+        ascending=[False, True, False],
+    ).index[0]
 
     figs = PROJECT_ROOT / "docs" / "figures"
     figs.mkdir(parents=True, exist_ok=True)
@@ -483,8 +520,13 @@ def main(argv: list[str] | None = None) -> None:
         "artifacts": [str(d.relative_to(PROJECT_ROOT)) for d in member_dirs],
         "temperature": float(table.loc[chosen, "temperature"]),
         "alert": alert,
-        "selected_on": "validation: detection rate at <= "
-        f"{args.max_false_alarms} false alarms/24 h, then fewer false alarms, then macro F1",
+        "selected_on": (
+            "validation wells"
+            if args.select_on == "val"
+            else "cross-validation predictions of all wells outside the test split"
+        )
+        + f": detection rate at <= {args.max_false_alarms} false alarms/24 h, "
+        "then fewer false alarms, then macro F1",
     }
     (PROJECT_ROOT / "configs" / "serving.yaml").write_text(
         "# Written by python -m owfd.models.evaluate\n" + yaml.safe_dump(serving, sort_keys=False)
