@@ -36,6 +36,7 @@ error 0.070 after temperature scaling.
 | | Test (10 wells, 126 episodes, 959 h normal) | Cross-validation (40 wells, 482 episodes, 4,053 h normal) |
 |---|---:|---:|
 | Episodes detected | 52% | 27% (95% CI 12–58%) at 2.6 false alarms / day; 31% at 1 / day (pooled) |
+| Episodes detected, excluding flow instability and severe slugging | 65% (20 of 31) | 66% (71 of 107; 95% CI 51–81%) |
 | False alarms per 24 h of normal operation | 1.8 | see left |
 | Median delay after onset | 4 min | 7 min |
 | Median lead before the steady state | 307 min | 173 min |

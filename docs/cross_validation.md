@@ -67,6 +67,9 @@ than average. The difference is almost entirely **flow instability**:
   normal.
 - **Excluding flow instability**, 55% of the remaining 139 episodes are detected (previous
   model: 48%).
+- **Excluding flow instability and severe slugging** (the two oscillating conditions), 66% of
+  the remaining 107 episodes are detected (71 of 107, 95% CI 51–81%), at the same false-alarm
+  rate; on the test wells, 65% (20 of 31).
 - Severe slugging: 31 of the 32 real episodes come from one well (WELL-00014). When that well
   is held out, the model has one real slugging example plus simulations: 16% detected.
 

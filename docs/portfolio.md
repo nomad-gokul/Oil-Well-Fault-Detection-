@@ -85,7 +85,8 @@ The test split has 10 wells and happened to be easier than average. Across all 4
 CV by well, nested tuning, bootstrap intervals), about one in four fault episodes is caught at
 about one false alarm per day. 71% of all episodes are flow instability, mostly on two wells that
 are unstable from the first minute of every recording, so "deviation from this well's normal"
-has nothing to compare with. Excluding those, 55% are caught. Reporting both numbers, and why
+has nothing to compare with. Excluding those, 55% are caught; excluding slugging as well (the
+other oscillating condition), 66% across all 40 wells and 65% on the test wells. Reporting both numbers, and why
 they differ, is more useful than quoting the best split.
 
 **Follow-up: how did you get from 27% to 78%, and is that real?**
