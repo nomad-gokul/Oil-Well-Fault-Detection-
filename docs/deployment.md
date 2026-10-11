@@ -92,6 +92,15 @@ CI rebuilds and smoke-tests the image with the committed model; Render redeploys
 automatically. Publishing a GitHub Release also pushes `owfd-api` and `owfd-dashboard` images
 to GitHub Container Registry (`.github/workflows/release.yml`).
 
+## Alternative: Railway (hosts the current live API)
+
+The live API runs on [Railway](https://railway.com) (paid after the trial; no idle sleep).
+1. **New Project → Deploy from GitHub repo**, branch `main`. Railway builds the root `Dockerfile`
+   automatically; do not set `RAILWAY_DOCKERFILE_PATH`.
+2. **Variables**: `OWFD_DEMO_MODE=true`, `OWFD_DEMO_SPEED=30`, `OWFD_API_KEY=<a long random value>`.
+3. **Settings**: healthcheck path `/health`; **Networking → Generate Domain**.
+4. Point the dashboard's `OWFD_API_URL` secret at that domain.
+
 ## Alternative: one small VM
 
 On any VM with Docker (e.g. a 1 GB instance):

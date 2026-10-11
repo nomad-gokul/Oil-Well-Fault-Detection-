@@ -75,3 +75,15 @@ def test_display_units() -> None:
     assert out["P-PDG"].iloc[0] == 220.0 and pd.isna(out["P-PDG"].iloc[1])  # placeholder hidden
     assert units == {"P-PDG": "bar", "T-TPT": "°C", "QGL": "m³/s"}
     assert out["T-TPT"].tolist() == [101.0, 102.0]
+
+
+def test_app_reads_streamlit_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
+    """On Streamlit Community Cloud the API address comes from secrets, not the environment."""
+    from streamlit.testing.v1 import AppTest
+
+    monkeypatch.delenv("OWFD_API_URL", raising=False)
+    at = AppTest.from_file(str(PROJECT_ROOT / "src/owfd/dashboard/app.py"), default_timeout=30)
+    at.secrets["OWFD_API_URL"] = "http://127.0.0.1:9"
+    at.run()
+    assert not at.exception
+    assert any("http://127.0.0.1:9" in w.value for w in at.warning)

@@ -1,11 +1,12 @@
 """Live alert dashboard (Streamlit). Run: ``streamlit run src/owfd/dashboard/app.py``.
 
 Talks only to the API (``OWFD_API_URL``; ``OWFD_API_KEY`` for acknowledging alerts and demo
-controls).
+controls), read from Streamlit secrets (Community Cloud) or else environment variables.
 """
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -34,9 +35,18 @@ COLORS = {"Fault": "#c0392b", "Warning": "#e67e22", "Normal": "#27ae60", "No dat
 SEVERITY_ICON = {"high": "🔴", "medium": "🟠", "low": "🟡"}
 
 
+def setting(name: str) -> str | None:
+    """A Streamlit secret (Community Cloud), else the environment variable (Docker, local)."""
+    try:
+        value = st.secrets.get(name)
+    except FileNotFoundError:  # no secrets.toml
+        value = None
+    return str(value) if value else os.environ.get(name)
+
+
 @st.cache_resource
 def client() -> Client:
-    return Client()
+    return Client(setting("OWFD_API_URL"), setting("OWFD_API_KEY"))
 
 
 def api_down(exc: Exception) -> None:
