@@ -34,3 +34,24 @@ def test_profiles_score_and_explain(bundle: Path) -> None:
 def test_bundle_without_profiles(tmp_path: Path) -> None:
     profiles = WellProfiles.from_manifest(tmp_path, {})
     assert not profiles and not profiles.has("w1") and profiles.info("w1") is None
+
+
+def test_profile_age_limit() -> None:
+    section = {
+        "max_age_days": 180,
+        "profiles": {
+            "w": {"file": "w.json", "trained_until": "2020-01-01"},
+            "demo-x": {
+                "file": "d.json",
+                "trained_until": "2014-01-01",
+                "age_checked_at_build": True,
+            },
+        },
+    }
+    profiles = WellProfiles.__new__(WellProfiles)
+    profiles.section, profiles.models, profiles.features = section, {}, []
+    assert profiles.active("w", "2020-06-01") and not profiles.active("w", "2020-07-30")
+    assert profiles.active("demo-x", "2026-01-01")  # checked when built (shifted demo clock)
+    assert not profiles.active("unknown", "2020-01-02")
+    section.pop("max_age_days")
+    assert profiles.active("w", "2030-01-01")  # bundles without a limit

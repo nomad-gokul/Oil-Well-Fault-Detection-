@@ -38,20 +38,31 @@ after every 5 newly labelled recordings.
 Each recording is scored by a profile trained **only on that well's recordings that ended
 before it started** (consecutive 3W recordings overlap by about an hour, so overlapping ones
 are excluded). Labels stand in for operator feedback; `--label-frac` keeps only a random share
-of them. A well's first episodes, before any profile exists, count as misses.
+of them. A well's first episodes, before any profile exists, count as misses. A profile whose
+newest training data is more than **180 days** older than the recording is not used (it is
+refitted as soon as newer labels exist): a well's normal operation changes over years.
+
+| Profile age limit | Unstable episodes caught | Extra false alarms / day |
+|---|---:|---:|
+| none | 277 / 343 | 0.34 |
+| 365 or **180 days (used)** | 277 / 343 | 0.31 |
+| 90 days | 275 / 343 | 0.31 |
+| 30 days | 274 / 343 | 0.24 |
+
+Results with the 180-day limit:
 
 | Labels available | Unstable episodes caught | ... once the well has a profile | Continuations | New onsets | Extra false alarms / day (those 7 wells) |
 |---|---:|---:|---:|---:|---:|
-| Every past recording | **277 / 343 (81%)** | 277 / 299 (93%) | 273 / 329 | 4 / 14 | 0.34 |
-| A random 25% of them | 146 / 343 (43%) | 146 / 187 (78%) | 140 / 329 | 6 / 14 | 1.16 |
+| Every past recording | **277 / 343 (81%)** | 277 / 299 (93%) | 273 / 329 | 4 / 14 | 0.31 |
+| A random 25% of them | 146 / 343 (43%) | 146 / 187 (78%) | 140 / 329 | 6 / 14 | 0.96 |
 
 **Whole system across all 40 wells** (onset model cross-validation + profiles):
 
 | | Fault episodes caught | False alarms / day |
 |---|---:|---:|
 | Onset model only | 27% (130 / 482) | 2.56 |
-| + profiles, every past recording labelled | **78% (378 / 482)** | 2.72 |
-| + profiles, 25% labelled | 52% (248 / 482) | 3.10 |
+| + profiles, every past recording labelled | **78% (378 / 482)** | 2.70 |
+| + profiles, 25% labelled | 52% (248 / 482) | 3.00 |
 
 ## 5. What this does, and does not, do
 
@@ -67,9 +78,14 @@ of them. A well's first episodes, before any profile exists, count as misses.
 ## 6. In the live system
 
 - `deploy/bundle/profiles/`: one gzipped model per well with enough labelled history (7 real
-  wells), plus profiles for two demo wells trained only on their source well's recordings that
-  ended before the demo recording starts. The instability demo itself has no profile (its well
-  had no labelled normal data before it); the onset model alerts on it.
+  wells), plus a profile for one demo well (slugging) trained only on its source well's
+  recordings that ended before the demo recording starts. Demo profiles older than 180 days at
+  the demo start are not built (four were skipped, the oldest 1,077 days). The instability demo
+  has no profile (its well had no labelled normal data before it); the onset model alerts on it.
+- **Age limit at serving:** a real well's profile is only used for data at most 180 days after
+  its newest training data (`GET /wells/{id}/profile` shows when it expires). The bundled
+  profiles end in 2017–2018, so on live data today they are expired until refreshed with new
+  labels, which is the intended behaviour.
 - Chronic alerts are stored and shown like other alerts, with `source: "chronic"`, the profile's
   top SHAP drivers, and a badge on the dashboard's fleet view.
 - **Feedback loop:** `POST /alerts/{id}/feedback` (confirmed / false_alarm / flow_instability)
@@ -78,11 +94,11 @@ of them. A well's first episodes, before any profile exists, count as misses.
   learns from.
 - `GET /wells/{id}/profile` shows whether a well has a profile and what it was trained on.
 
-Observed in the demo: the PCK-restriction scenario comes from WELL-00004 in 2017, whose profile
-was trained on its 2014 recordings. During the (labelled normal) first hours it raised a chronic
-alert that resolved later: by the labels a false alarm, an old profile misreading a newer
-operating regime. Profiles need refreshing as wells change; the *False alarm* button records
-exactly that correction for the next build.
+Why the age limit exists: in the first version the PCK-restriction demo (WELL-00004, 2017) had a
+profile trained on that well's 2014 recordings, and during its labelled-normal first hours it
+raised a chronic alert: a false alarm from an old profile misreading a newer operating regime.
+With the 180-day limit that profile is not used; the replay above shows the limit costs no
+detection and removes false alarms across all wells.
 
 Reproduce:
 

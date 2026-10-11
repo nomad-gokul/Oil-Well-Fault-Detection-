@@ -1,7 +1,7 @@
 {
- "version": "20261011-133749",
- "created": "2026-10-11T13:37:49+00:00",
- "git_commit": "79c5d17",
+ "version": "20261011-161356",
+ "created": "2026-10-11T16:13:57+00:00",
+ "git_commit": "eb43d60",
  "model": "xgb_ctx",
  "members": [
   {
@@ -327,6 +327,7 @@
   "threshold": 0.8,
   "k": 20,
   "class": 4,
+  "max_age_days": 180.0,
   "features": [
    "P-PDG__mean",
    "P-PDG__std",
@@ -572,65 +573,66 @@
     "source_well": "WELL-00001",
     "trained_until": "2017-08-28 14:56:17",
     "unstable_windows": 4373,
-    "normal_windows": 29101
+    "normal_windows": 29101,
+    "age_checked_at_build": false
    },
    "WELL-00002": {
     "file": "WELL-00002.json.gz",
     "source_well": "WELL-00002",
     "trained_until": "2017-08-13 19:58:47",
     "unstable_windows": 13386,
-    "normal_windows": 61440
+    "normal_windows": 61440,
+    "age_checked_at_build": false
    },
    "WELL-00004": {
     "file": "WELL-00004.json.gz",
     "source_well": "WELL-00004",
     "trained_until": "2017-10-31 20:13:56",
     "unstable_windows": 5147,
-    "normal_windows": 1523
+    "normal_windows": 1523,
+    "age_checked_at_build": false
    },
    "WELL-00005": {
     "file": "WELL-00005.json.gz",
     "source_well": "WELL-00005",
     "trained_until": "2017-09-10 14:57:47",
     "unstable_windows": 4545,
-    "normal_windows": 16367
+    "normal_windows": 16367,
+    "age_checked_at_build": false
    },
    "WELL-00007": {
     "file": "WELL-00007.json.gz",
     "source_well": "WELL-00007",
     "trained_until": "2017-08-01 21:59:44",
     "unstable_windows": 1197,
-    "normal_windows": 240
+    "normal_windows": 240,
+    "age_checked_at_build": false
    },
    "WELL-00010": {
     "file": "WELL-00010.json.gz",
     "source_well": "WELL-00010",
     "trained_until": "2018-07-24 13:55:23",
     "unstable_windows": 9909,
-    "normal_windows": 3552
+    "normal_windows": 3552,
+    "age_checked_at_build": false
    },
    "WELL-00014": {
     "file": "WELL-00014.json.gz",
     "source_well": "WELL-00014",
     "trained_until": "2017-09-24 19:00:00",
     "unstable_windows": 2510,
-    "normal_windows": 830
+    "normal_windows": 830,
+    "age_checked_at_build": false
    },
    "demo-3-slugging": {
     "file": "demo-3-slugging.json.gz",
     "source_well": "WELL-00014",
     "trained_until": "2017-09-17 13:59:38",
     "unstable_windows": 2031,
-    "normal_windows": 830
-   },
-   "demo-6-pck-restriction": {
-    "file": "demo-6-pck-restriction.json.gz",
-    "source_well": "WELL-00004",
-    "trained_until": "2014-11-18 23:00:00",
-    "unstable_windows": 5147,
-    "normal_windows": 1431
+    "normal_windows": 830,
+    "age_checked_at_build": true
    }
   },
-  "build": "20261011-133532"
+  "build": "20261011-161308"
  }
 }

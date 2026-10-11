@@ -48,6 +48,9 @@ MIN_WINDOWS = 60
 RETRAIN_EVERY = 5
 #: Chronic alert rule, fixed in advance (the evaluation shows the results barely depend on it).
 RULE = AlertRule(threshold=0.8, k=20)
+#: A profile whose newest training data is older than this is not used: the well's normal
+#: operation may have changed (replay: same detection, fewer false alarms than no limit).
+MAX_AGE_DAYS = 180.0
 META = ["instance_id", "well_id", "end_time", "event_class"]
 
 
@@ -75,34 +78,47 @@ def prequential(
     features: list[str],
     label_frac: float = 1.0,
     seed: int = 0,
+    max_age_days: float | None = None,
 ) -> pd.DataFrame:
     """P(unstable) for every window of every well that ever has unstable labels, each recording
     scored by a profile trained only on that well's (labelled) recordings that ended before it
-    started. ``instances`` is indexed by instance id with ``start_time`` and ``end_time``."""
+    started. ``instances`` is indexed by instance id with ``start_time`` and ``end_time``.
+
+    With ``max_age_days``, a profile whose newest training data is older than that when a
+    recording starts is not used (the well's normal may have changed); it is refitted as soon
+    as any newer labels exist."""
     out = []
     for _, g in windows.groupby("well_id"):
         if not (g["event_class"] == UNSTABLE).any():
             continue
         order = instances.loc[g["instance_id"].unique()].sort_values("start_time").index.tolist()
-        model, n_at_fit = None, -1
+        model, n_at_fit, fitted_until = None, -1, pd.NaT
+        max_age = pd.Timedelta(days=max_age_days) if max_age_days is not None else None
         for iid in order:
             start = instances.at[iid, "start_time"]
             done = [
                 o for o in order
                 if instances.at[o, "end_time"] <= start and _is_labelled(o, label_frac, seed)
             ]  # fmt: skip
-            if model is None or len(done) - n_at_fit >= RETRAIN_EVERY:
+            stale = max_age is not None and model is not None and start - fitted_until > max_age
+            if (
+                model is None
+                or len(done) - n_at_fit >= RETRAIN_EVERY
+                or (stale and len(done) > n_at_fit)
+            ):
                 hist = g[g["instance_id"].isin(done) & g["event_class"].isin([0, UNSTABLE])]
                 fitted = fit_profile(hist[features], hist["event_class"].to_numpy() == UNSTABLE)
                 if fitted is not None:
                     model, n_at_fit = fitted, len(done)
+                    fitted_until = instances.loc[done, "end_time"].max()
+            active = model is not None and (max_age is None or start - fitted_until <= max_age)
             cur = g[g["instance_id"] == iid].sort_values("end_time")
             p = (
                 model.predict_proba(cur[features])[:, 1]
-                if model is not None
+                if active and model is not None
                 else np.zeros(len(cur))
             )
-            out.append(cur[META].assign(p_unstable=p, has_profile=model is not None))
+            out.append(cur[META].assign(p_unstable=p, has_profile=active))
     return pd.concat(out, ignore_index=True) if out else pd.DataFrame(columns=META)
 
 
@@ -172,7 +188,9 @@ def _demo_sources(demo_dir: Path, instances: pd.DataFrame) -> dict[str, tuple[st
 
 def build(settings: Any, out_dir: Path) -> dict[str, Any]:
     """Profiles from all labelled history of every well, plus one per demo well trained only on
-    its source well's recordings that ended before the demo recording starts."""
+    its source well's recordings that ended before the demo recording starts. A demo profile
+    older than ``MAX_AGE_DAYS`` at the demo recording's start is not built: the API would not
+    use it (demo timestamps are shifted to the present, so its age is checked here)."""
     windows, instances, features = _load(settings)
     labelled = windows[windows["event_class"].isin([0, UNSTABLE])]
     targets: dict[str, tuple[str, pd.Timestamp | None]] = {
@@ -185,6 +203,12 @@ def build(settings: Any, out_dir: Path) -> dict[str, Any]:
         g = labelled[labelled["well_id"] == well]
         if cutoff is not None:
             g = g[g["instance_id"].map(instances["end_time"]) <= cutoff]
+        if len(g) and cutoff is not None:
+            age = cutoff - g["end_time"].max()
+            if age > pd.Timedelta(days=MAX_AGE_DAYS):
+                logger.info("%s: newest labels are %s old at the demo start; no profile",
+                            profile_id, age)  # fmt: skip
+                continue
         model = fit_profile(g[features], g["event_class"].to_numpy() == UNSTABLE)
         if model is None:
             continue
@@ -194,10 +218,11 @@ def build(settings: Any, out_dir: Path) -> dict[str, Any]:
             "trained_until": str(g["end_time"].max()),
             "unstable_windows": int((g["event_class"] == UNSTABLE).sum()),
             "normal_windows": int((g["event_class"] == 0).sum()),
+            "age_checked_at_build": cutoff is not None,
         }  # fmt: skip
     section = {
         "threshold": RULE.threshold, "k": RULE.k, "class": UNSTABLE,
-        "features": features, "profiles": profiles,
+        "max_age_days": MAX_AGE_DAYS, "features": features, "profiles": profiles,
     }  # fmt: skip
     (out_dir / "profiles.json").write_text(json.dumps(section, indent=1))
     return section
@@ -208,6 +233,8 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Per-well flow-instability profiles.")
     parser.add_argument("command", choices=("evaluate", "build"))
     parser.add_argument("--label-frac", type=float, default=1.0, help="share of labelled past")
+    parser.add_argument("--max-age-days", type=float, help="ignore profiles older than this")
+    parser.add_argument("--no-max-age", action="store_true", help="evaluate without an age limit")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     settings = get_settings()
@@ -218,16 +245,21 @@ def main(argv: list[str] | None = None) -> None:
         logger.info("%d profiles -> %s", len(section["profiles"]), root / version)
         return
     windows, instances, features = _load(settings)
-    preds = prequential(windows, instances, features, args.label_frac, settings.random_seed)
+    if args.max_age_days is None and not args.no_max_age:
+        args.max_age_days = MAX_AGE_DAYS
+    preds = prequential(
+        windows, instances, features, args.label_frac, settings.random_seed, args.max_age_days
+    )
     report = chronic_report(preds)
-    result = {"label_frac": args.label_frac, "rule": RULE.__dict__,
-              "summary": summarize(report, instances)}  # fmt: skip
+    result = {"label_frac": args.label_frac, "max_age_days": args.max_age_days,
+              "rule": RULE.__dict__, "summary": summarize(report, instances)}  # fmt: skip
+    tag = f"{args.label_frac:g}" + (f"_age{args.max_age_days:g}" if args.max_age_days else "")
     root.mkdir(parents=True, exist_ok=True)
-    preds.to_parquet(root / f"prequential_{args.label_frac:g}.parquet")
-    report.to_parquet(root / f"report_{args.label_frac:g}.parquet")
-    (root / f"evaluation_{args.label_frac:g}.json").write_text(json.dumps(result, indent=1))
+    preds.to_parquet(root / f"prequential_{tag}.parquet")
+    report.to_parquet(root / f"report_{tag}.parquet")
+    (root / f"evaluation_{tag}.json").write_text(json.dumps(result, indent=1))
     logger.info("%s", json.dumps(result, indent=1))
-    logger.info("-> %s", (root / f"evaluation_{args.label_frac:g}.json").relative_to(PROJECT_ROOT))
+    logger.info("-> %s", (root / f"evaluation_{tag}.json").relative_to(PROJECT_ROOT))
 
 
 if __name__ == "__main__":
