@@ -3,7 +3,7 @@
 Usage::
 
     python -m owfd.models.train_xgb [--config configs/xgb.yaml] [--name xgb_baseline]
-                                    [--no-missing-features]
+                                    [--no-missing-features] [--drop REGEX]
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
@@ -49,9 +50,13 @@ def balanced_weights(y: np.ndarray, cap: float) -> np.ndarray:
     return w / w.mean()
 
 
-def select_columns(names: list[str], use_missing_features: bool) -> list[str]:
-    """Feature columns, optionally without the missing-data indicators (shortcut ablation)."""
-    return names if use_missing_features else [n for n in names if not n.endswith("frac_missing")]
+def select_columns(
+    names: list[str], use_missing_features: bool, drop: str | None = None
+) -> list[str]:
+    """Feature columns, optionally without the missing-data indicators (shortcut ablation) and
+    without names matching the regular expression ``drop`` (feature-group ablations)."""
+    cols = names if use_missing_features else [n for n in names if not n.endswith("frac_missing")]
+    return [n for n in cols if not re.search(drop, n)] if drop else cols
 
 
 def select_n_trees(
@@ -82,10 +87,11 @@ def train_xgb(
     *,
     use_missing_features: bool = True,
     seed: int = 42,
+    drop: str | None = None,
 ) -> tuple[XGBClassifier, dict[str, dict[str, Any]]]:
     """Fit on train, keep the tree count with the best val macro F1, evaluate, save artifacts."""
     names = json.loads((features_dir / "feature_names.json").read_text())
-    columns = select_columns(names, use_missing_features)
+    columns = select_columns(names, use_missing_features, drop)
     x_train, y_train = load_split(features_dir, "train", columns)
     x_val, y_val = load_split(features_dir, "val", columns)
     cap = config["class_weight_cap"]
@@ -117,6 +123,7 @@ def train_xgb(
             {
                 **config,
                 "use_missing_features": use_missing_features,
+                "drop": drop,
                 "seed": seed,
                 "n_trees": n_trees,
                 "val_macro_f1_curve": curve,
@@ -133,6 +140,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--config", type=Path, default=PROJECT_ROOT / "configs" / "xgb.yaml")
     parser.add_argument("--name", default="xgb_baseline")
     parser.add_argument("--no-missing-features", action="store_true")
+    parser.add_argument("--drop", help="regex: leave out matching features (ablation)")
     parser.add_argument("--tracking-uri", default=DEFAULT_TRACKING_URI)
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -149,6 +157,7 @@ def main(argv: list[str] | None = None) -> None:
         _, metrics = train_xgb(
             config, features_dir, out_dir,
             use_missing_features=not args.no_missing_features, seed=settings.random_seed,
+            drop=args.drop,
         )  # fmt: skip
         shutil.copy(settings.resolve(settings.artifacts_dir) / "preprocessing" / "scaler.json",
                     out_dir / "scaler.json")  # fmt: skip
