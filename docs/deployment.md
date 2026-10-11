@@ -4,7 +4,7 @@ Free, two-part setup:
 
 | Part | Where | Built from |
 |---|---|---|
-| **API** (FastAPI + model + demo replay) | [Render](https://render.com) free web service | `docker/api.Dockerfile` in this repo, via `render.yaml`; model in `deploy/bundle/` |
+| **API** (FastAPI + model + demo replay) | [Render](https://render.com) free web service | `Dockerfile` (repo root) in this repo, via `render.yaml`; model in `deploy/bundle/` |
 | **Dashboard** (Streamlit) | [Streamlit Community Cloud](https://share.streamlit.io) | `src/owfd/dashboard/app.py` in this repo |
 
 The API runs in **demo mode**: it replays 10 held-out real wells from the 3W test set (one per

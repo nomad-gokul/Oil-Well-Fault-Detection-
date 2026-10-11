@@ -1,7 +1,7 @@
 # Local stack: `make up` (builds images, then http://localhost:8501).
 services:
   api:
-    build: { context: ., dockerfile: docker/api.Dockerfile }
+    build: { context: ., dockerfile: Dockerfile }
     image: owfd-api:local
     ports: ["8000:8000"]
     environment:
