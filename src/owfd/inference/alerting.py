@@ -2,6 +2,11 @@
 
 Pure logic (no I/O): feed it predictions in time order, get :class:`AlertEvent`s back. The
 API persists the events and restores open alerts on restart with :meth:`AlertEngine.restore`.
+
+Per-well thresholds (optional, from the bundle): the first ``burnin_windows`` predictions of a
+well's stream are its burn-in. Meanwhile the global threshold applies; afterwards the well
+uses ``max(threshold, min(quantile(burn-in P(fault), burnin_quantile) + burnin_margin,
+max_threshold))``, as tuned in ``owfd.models.evaluate``.
 """
 
 from __future__ import annotations
@@ -37,14 +42,34 @@ class AlertConfig:
     resolve_after: int = 10
     cooldown_s: float = 1800
     severity: dict[int, str] = field(default_factory=dict)
+    burnin_quantile: float | None = None
+    burnin_margin: float = 0.0
+    max_threshold: float = 0.99
+    burnin_windows: int = 0
 
     @classmethod
     def from_files(cls, alert_rule: dict[str, Any], path: Path) -> AlertConfig:
         """Combine the bundle's ``alert`` section with ``configs/alerts.yaml``."""
         extra = yaml.safe_load(path.read_text()) if path.exists() else {}
         severity = {int(c): str(s) for c, s in (extra.pop("severity", None) or {}).items()}
-        return cls(threshold=float(alert_rule["threshold"]), k=int(alert_rule["k"]),
-                   severity=severity, **extra)  # fmt: skip
+        q = alert_rule.get("burnin_quantile")
+        return cls(
+            threshold=float(alert_rule["threshold"]),
+            k=int(alert_rule["k"]),
+            severity=severity,
+            burnin_quantile=None if q is None else float(q),
+            burnin_margin=float(alert_rule.get("burnin_margin", 0.0)),
+            max_threshold=float(alert_rule.get("max_threshold", 0.99)),
+            burnin_windows=int(alert_rule.get("burnin_windows", 0)),
+            **extra,
+        )
+
+    def well_threshold(self, burnin_p: list[float]) -> float:
+        """Threshold after a burn-in with these P(fault) values (global one if disabled)."""
+        if self.burnin_quantile is None or not burnin_p:
+            return self.threshold
+        adaptive = float(np.quantile(burnin_p, self.burnin_quantile)) + self.burnin_margin
+        return max(self.threshold, min(adaptive, self.max_threshold))
 
     def severity_of(self, event_class: int) -> str:
         """Severity label of an event class."""
@@ -86,6 +111,9 @@ class _WellState:
     run_below: int = 0
     active: Alert | None = None
     last_resolved: pd.Timestamp | None = None
+    seen: int = 0
+    burnin_p: list[float] = field(default_factory=list)
+    threshold: float | None = None  # set when the burn-in ends
 
 
 class AlertEngine:
@@ -106,12 +134,32 @@ class AlertEngine:
         state = self.wells.get(well_id)
         return state.active if state else None
 
+    def threshold(self, well_id: str) -> float:
+        """The well's current alert threshold (global until its burn-in is complete)."""
+        state = self.wells.get(well_id)
+        if state is None or state.threshold is None:
+            return self.config.threshold
+        return state.threshold
+
+    def _burnin(self, s: _WellState, p_fault: float) -> None:
+        cfg = self.config
+        s.seen += 1
+        if cfg.burnin_quantile is None or s.threshold is not None:
+            return
+        if s.seen <= cfg.burnin_windows:
+            s.burnin_p.append(p_fault)
+        if s.seen >= cfg.burnin_windows:
+            s.threshold = cfg.well_threshold(s.burnin_p)
+            s.burnin_p = []
+
     def process(self, p: Prediction) -> list[AlertEvent]:
         """Update the well's state with one prediction (in time order)."""
         cfg = self.config
         s = self.wells.setdefault(p.well_id, _WellState())
-        s.run_above = s.run_above + 1 if p.p_fault > cfg.threshold else 0
-        below = p.p_fault < cfg.threshold - cfg.resolve_margin
+        threshold = self.threshold(p.well_id)  # the burn-in window itself uses the global one
+        self._burnin(s, p.p_fault)
+        s.run_above = s.run_above + 1 if p.p_fault > threshold else 0
+        below = p.p_fault < threshold - cfg.resolve_margin
         s.run_below = s.run_below + 1 if below else 0
         fault_class = int(np.argmax(p.probabilities[1:])) + 1  # most likely fault class
 

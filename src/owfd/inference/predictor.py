@@ -25,7 +25,15 @@ from owfd.config import PreprocessingConfig
 from owfd.data.clean import Scaler, clean_instance
 from owfd.data.schema import CLASS_NAMES
 from owfd.data.windows import INPUT_MODES, channels
-from owfd.features.stats import feature_names, window_features
+from owfd.features.context import (
+    BLOCK_S,
+    MAX_BLOCKS,
+    all_feature_names,
+    block_means,
+    context_feature_names,
+    context_features,
+)
+from owfd.features.stats import window_features
 
 N_CLASSES = len(CLASS_NAMES)
 
@@ -40,8 +48,11 @@ class Prediction:
     class_name: str
     p_fault: float
     probabilities: list[float]
-    #: (scaled window [window_s, 2k], baseline [k]) when requested, e.g. for explanations.
-    inputs: tuple[np.ndarray, np.ndarray] | None = field(default=None, repr=False, compare=False)
+    #: (scaled window [window_s, 2k], baseline [k], context blocks [MAX_BLOCKS, k]) when
+    #: requested, e.g. for explanations.
+    inputs: tuple[np.ndarray, np.ndarray, np.ndarray] | None = field(
+        default=None, repr=False, compare=False
+    )
 
     def to_dict(self) -> dict[str, Any]:
         """JSON-friendly representation (without ``inputs``)."""
@@ -91,7 +102,7 @@ class Predictor:
         self.temperature: float = self.manifest["temperature"]
         self.variables = list(self.preprocessing.variables)
         self.channels = channels(self.variables)
-        self._all_features = feature_names(self.variables)
+        self._all_features = all_feature_names(self.variables)
         self._members: list[tuple[str, Any, dict[str, Any]]] = []
         for member in self.manifest["members"]:
             if member["kind"] == "xgb":
@@ -108,24 +119,50 @@ class Predictor:
                 self._members.append(("onnx", session, member))
             else:
                 raise ValueError(f"Unknown member kind {member['kind']}")
+        context = set(context_feature_names(self.variables))
+        #: Whether any member uses long-context features (older bundles do not).
+        self.uses_context = any(
+            context & set(meta["features"]) for kind, _, meta in self._members if kind == "xgb"
+        )
+        if self.uses_context and (self.window_s % BLOCK_S or self.stride_s % BLOCK_S):
+            raise ValueError(f"window_s and stride_s must be multiples of {BLOCK_S}")
 
     @classmethod
     def load(cls, bundle: Path) -> Predictor:
         """Load a bundle folder."""
         return cls(bundle)
 
-    def predict_proba(self, x: np.ndarray, baseline: np.ndarray) -> np.ndarray:
-        """Calibrated class probabilities [n, 10] for scaled windows ``x`` [n, window_s, 2k]
-        and stream baselines [n, k]."""
+    def _features(
+        self, x: np.ndarray, baseline: np.ndarray, blocks: np.ndarray | None
+    ) -> np.ndarray:
+        """All tabular features [n, n_features]; context features are NaN without ``blocks``
+        (or skipped entirely when no member uses them)."""
+        short = window_features(x, self.variables, baseline)
+        n_context = len(self._all_features) - short.shape[1]
+        if not self.uses_context:
+            return np.concatenate([short, np.full((len(x), n_context), np.nan, np.float32)], 1)
+        if blocks is None:
+            blocks = np.full((len(x), MAX_BLOCKS, len(self.variables)), np.nan)
+        return np.concatenate([short, context_features(blocks, baseline)], axis=1)
+
+    def predict_proba(
+        self, x: np.ndarray, baseline: np.ndarray, blocks: np.ndarray | None = None
+    ) -> np.ndarray:
+        """Calibrated class probabilities [n, 10] for scaled windows ``x`` [n, window_s, 2k],
+        stream baselines [n, k] and one-minute context blocks [n, MAX_BLOCKS, k] (see
+        :func:`owfd.features.context.block_means`; computed from float16-rounded values)."""
         # The training window store keeps scaled values as float16 (owfd.data.windows), so the
         # models were fit on float16-rounded inputs: round identically to avoid serving skew.
         x = x.astype(np.float16).astype(np.float32)
         probas = []
+        feats_all: np.ndarray | None = None
         for kind, model, meta in self._members:
             if kind == "xgb":
                 import xgboost as xgb
 
-                feats = window_features(x, self.variables, baseline)[:, meta["cols"]]
+                if feats_all is None:
+                    feats_all = self._features(x, baseline, blocks)
+                feats = feats_all[:, meta["cols"]]
                 dm = xgb.DMatrix(feats, feature_names=meta["features"])
                 probas.append(np.asarray(model.predict(dm)).reshape(len(x), N_CLASSES))
             else:
@@ -137,10 +174,13 @@ class Predictor:
                 probas.append(e / e.sum(axis=1, keepdims=True))
         return _softmax_t(np.mean(probas, axis=0), self.temperature)
 
-    def xgb_features(self, x: np.ndarray, baseline: np.ndarray) -> np.ndarray:
+    def xgb_features(
+        self, x: np.ndarray, baseline: np.ndarray, blocks: np.ndarray | None = None
+    ) -> np.ndarray:
         """Features of the first XGBoost member (its column subset), for explanations."""
         meta = next(m for kind, _, m in self._members if kind == "xgb")
-        return window_features(x, self.variables, baseline)[:, meta["cols"]]
+        x = x.astype(np.float16).astype(np.float32)
+        return self._features(x, baseline, blocks)[:, meta["cols"]]
 
     def predict_window(
         self, raw: pd.DataFrame, well_id: str = "unknown", keep_inputs: bool = False
@@ -159,15 +199,18 @@ class Predictor:
         observed = head[:, k:] < 0.5
         base = _mean_or_nan((head[:, :k] * observed).sum(axis=0), observed.sum(axis=0))
         x = values[-self.window_s :]
-        proba = self.predict_proba(x[None], base[None])[0]
-        return self._prediction(well_id, raw.index[-1], proba, (x, base) if keep_inputs else None)
+        v16 = values.astype(np.float16).astype(np.float64)
+        blocks = block_means(v16[:, :k], v16[:, k:] > 0.5, np.array([len(values) - 1]))
+        proba = self.predict_proba(x[None], base[None], blocks)[0]
+        inputs = (x, base, blocks[0]) if keep_inputs else None
+        return self._prediction(well_id, raw.index[-1], proba, inputs)
 
     def _prediction(
         self,
         well_id: str,
         ts: Any,
         proba: np.ndarray,
-        inputs: tuple[np.ndarray, np.ndarray] | None = None,
+        inputs: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None,
     ) -> Prediction:
         c = int(np.argmax(proba))
         probs = [float(p) for p in proba]
@@ -180,6 +223,8 @@ class _WellState:
     n_seen: int = 0
     base_sum: np.ndarray = field(default_factory=lambda: np.zeros(0))
     base_cnt: np.ndarray = field(default_factory=lambda: np.zeros(0))
+    #: Means of the last MAX_BLOCKS completed one-minute blocks [n, k], oldest first.
+    blocks: np.ndarray = field(default_factory=lambda: np.zeros((0, 0)))
 
 
 class StreamingPredictor:
@@ -187,7 +232,9 @@ class StreamingPredictor:
 
     Readings must arrive in time order at 1 Hz. The buffer keeps
     ``window_s + stuck_after_s + ffill_limit_s + 1`` rows, enough for every preprocessing step
-    to see the same history as in training, so online predictions equal offline ones.
+    to see the same history as in training, so online predictions equal offline ones. Long
+    context is kept as one mean per completed minute (computed while its rows are in the
+    buffer, so with the same history as offline).
     """
 
     def __init__(self, predictor: Predictor) -> None:
@@ -214,7 +261,7 @@ class StreamingPredictor:
         k = len(self.p.variables)
         state = self.wells.get(well_id)
         if state is None:
-            state = _WellState(readings.iloc[:0], 0, np.zeros(k), np.zeros(k))
+            state = _WellState(readings.iloc[:0], 0, np.zeros(k), np.zeros(k), np.zeros((0, k)))
             self.wells[well_id] = state
         old_len = len(state.buffer)
         frame = pd.concat([state.buffer, readings]) if old_len else readings
@@ -233,16 +280,33 @@ class StreamingPredictor:
         is_end = (positions >= w - 1) & ((positions - (w - 1)) % stride == 0)
         out: list[Prediction] = []
         js = np.flatnonzero(is_end)
+        history = state.blocks
+        ctx: np.ndarray | None = None
+        if self.p.uses_context:
+            # One-minute blocks ending in this batch (window ends are block ends too).
+            bj = np.flatnonzero(((positions + 1) % BLOCK_S == 0) & (positions >= BLOCK_S - 1))
+            v16 = values.astype(np.float16).astype(np.float64)
+            new_blocks = block_means(v16[:, :k], v16[:, k:] > 0.5, old_len + bj, n_blocks=1)
+            history = np.concatenate([state.blocks, new_blocks[:, 0, :]])
+            # Index of each window end's block in `history`, then its last MAX_BLOCKS blocks.
+            at = len(state.blocks) + np.searchsorted(bj, js)
+            padded = np.concatenate([np.full((MAX_BLOCKS - 1, k), np.nan), history])
+            ctx = np.stack([padded[i : i + MAX_BLOCKS] for i in at]) if js.size else None
         if js.size:
             rows = old_len + js
             windows = np.stack([values[r - w + 1 : r + 1] for r in rows])
             bases = _mean_or_nan(cum_sum[js], cum_cnt[js])
-            proba = self.p.predict_proba(windows, bases)
+            proba = self.p.predict_proba(windows, bases, ctx)
+            blank = np.full((MAX_BLOCKS, k), np.nan)
             out = [
-                self.p._prediction(well_id, frame.index[r], pr,
-                                   (windows[n], bases[n]) if keep_inputs else None)
+                self.p._prediction(
+                    well_id, frame.index[r], pr,
+                    (windows[n], bases[n], ctx[n] if ctx is not None else blank)
+                    if keep_inputs else None,
+                )
                 for n, (r, pr) in enumerate(zip(rows, proba, strict=True))
             ]  # fmt: skip
+        state.blocks = history[-MAX_BLOCKS:]
         state.base_sum, state.base_cnt = cum_sum[-1], cum_cnt[-1]
         state.n_seen += len(readings)
         state.buffer = frame.iloc[-self.keep :]

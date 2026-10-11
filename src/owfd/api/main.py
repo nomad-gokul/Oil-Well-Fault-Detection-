@@ -280,8 +280,8 @@ class Service:
         """Top SHAP drivers for a prediction (XGBoost bundles only)."""
         if self.explainer is None or p.inputs is None:
             return None
-        x, base = p.inputs
-        feats = self.predictor.xgb_features(x[None], base[None])
+        x, base, blocks = p.inputs
+        feats = self.predictor.xgb_features(x[None], base[None], blocks[None])
         out = self.explainer.explain_window(feats[0], top=5, target=p.predicted_class or None)
         return [Driver(feature=d.feature, value=d.value, contribution=d.contribution) for d in out]
 
@@ -293,7 +293,7 @@ class Service:
             predicted_class=p.predicted_class,
             class_name=p.class_name,
             p_fault=p.p_fault,
-            is_fault=p.p_fault > self.alerts.config.threshold,
+            is_fault=p.p_fault > self.alerts.threshold(p.well_id),
             probabilities={CLASS_NAMES[i]: v for i, v in enumerate(p.probabilities)},
             drivers=self.drivers(p) if with_drivers else None,
         )

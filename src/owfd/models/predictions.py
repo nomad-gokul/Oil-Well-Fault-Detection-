@@ -67,3 +67,22 @@ def predictions(artifact_dir: Path, processed_dir: Path, split: str) -> pd.DataF
     out = pd.concat([meta.reset_index(drop=True), pd.DataFrame(proba, columns=PROBA)], axis=1)
     out.to_parquet(cache)
     return out
+
+
+def burnin_predictions(artifact_dir: Path, processed_dir: Path) -> pd.DataFrame | None:
+    """Probabilities ``p0..p9`` on the burn-in windows (the unlabelled first hour of every real
+    instance, ``features/burnin.parquet``); None for deep models or without that table."""
+    table = processed_dir / "features" / "burnin.parquet"
+    if model_kind(artifact_dir) != "xgb" or not table.exists():
+        return None
+    cache = artifact_dir / "predictions_burnin.parquet"
+    if cache.exists():
+        return pd.read_parquet(cache)
+    cols = json.loads((artifact_dir / "feature_names.json").read_text())
+    df = pd.read_parquet(table)
+    model = XGBClassifier()
+    model.load_model(artifact_dir / "model.json")
+    meta = df[["instance_id", "well_id", "end_pos"]].reset_index(drop=True)
+    out = pd.concat([meta, pd.DataFrame(model.predict_proba(df[cols]), columns=PROBA)], axis=1)
+    out.to_parquet(cache)
+    return out
