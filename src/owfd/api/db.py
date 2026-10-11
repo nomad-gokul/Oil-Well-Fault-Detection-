@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 from sqlalchemy import (
@@ -18,6 +19,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
+from sqlalchemy.pool import StaticPool
 
 from owfd.inference.alerting import Alert, AlertStatus
 from owfd.inference.predictor import Prediction
@@ -60,7 +62,12 @@ def make_engine(url: str) -> Engine:
     """Create the engine and tables (SQLite folders are created as needed)."""
     if url.startswith("sqlite:///") and not url.startswith("sqlite:///:memory:"):
         Path(url.removeprefix("sqlite:///")).parent.mkdir(parents=True, exist_ok=True)
-    kwargs = {"connect_args": {"check_same_thread": False}} if url.startswith("sqlite") else {}
+    kwargs: dict[str, Any] = {}
+    if url.startswith("sqlite"):
+        kwargs["connect_args"] = {"check_same_thread": False}
+        if url in ("sqlite://", "sqlite:///:memory:"):
+            # Every new connection to ":memory:" is a separate, empty database: share one.
+            kwargs["poolclass"] = StaticPool
     engine = create_engine(url, **kwargs)
     Base.metadata.create_all(engine)
     return engine
