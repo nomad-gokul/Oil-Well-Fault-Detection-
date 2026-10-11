@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 from owfd.inference.predictor import load_booster
 
@@ -36,6 +37,19 @@ class WellProfiles:
     def has(self, well_id: str) -> bool:
         """Whether this well has a profile."""
         return well_id in self.models
+
+    def active(self, well_id: str, when: Any) -> bool:
+        """Whether the well's profile may be used for data at ``when``: its newest training data
+        must be at most ``max_age_days`` old (demo profiles were checked when built, because
+        demo timestamps are shifted to the present)."""
+        meta = self.section.get("profiles", {}).get(well_id)
+        if meta is None:
+            return False
+        max_age = self.section.get("max_age_days")
+        if max_age is None or meta.get("age_checked_at_build"):
+            return True
+        age = pd.Timestamp(when) - pd.Timestamp(meta["trained_until"])
+        return bool(age <= pd.Timedelta(days=float(max_age)))
 
     def info(self, well_id: str) -> dict[str, Any] | None:
         """Training metadata of the well's profile."""

@@ -49,10 +49,11 @@ order (each recording scored only by a profile trained on that well's *earlier* 
 |---|---:|---:|
 | Onset model only | 27% | 2.6 |
 | + per-well profiles, every past recording labelled | **78%** | 2.7 |
-| + per-well profiles, 25% of past recordings labelled | 52% | 3.1 |
+| + per-well profiles, 25% of past recordings labelled | 52% | 3.0 |
 
 It tracks a known, long-running condition (329 of 343 unstable episodes continue an unstable
-recording); it does not discover a well's first instability (4 of 14 new onsets). Details:
+recording); it does not discover a well's first instability (4 of 14 new onsets). Profiles
+expire 180 days after their newest training data, since a well's normal operation drifts. Details:
 [docs/chronic_instability.md](docs/chronic_instability.md).
 
 ## How it works
@@ -165,7 +166,7 @@ configs/       YAML settings, split manifest, serving choice
 deploy/bundle/ production model bundle (< 1 MB)
 demo_data/     10 held-out test scenarios for the live demo (2 MB)
 docs/          data report, results, early warning, monitoring, performance, deployment, model card
-tests/         159 tests (unit, integration, API, dashboard) + a Locust load test
+tests/         162 tests (unit, integration, API, dashboard) + a Locust load test
 ```
 
 ## Tech stack

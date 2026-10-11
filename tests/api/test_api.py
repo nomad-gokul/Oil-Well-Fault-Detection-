@@ -338,3 +338,18 @@ def test_old_database_gets_the_source_column(tmp_path: Path) -> None:
 
     store = Store(make_engine(f"sqlite:///{db}"))
     assert store.get_alert(1)[0].source == "onset"
+
+
+def test_expired_profile_raises_no_chronic_alert(tmp_path: Path) -> None:
+    from tests.bundle import add_profile
+
+    # Trained on data up to 2016; the stream is from 2017: older than the 180-day limit.
+    bundle = build_bundle(tmp_path / "b", context=True)
+    add_profile(bundle, "WELL-T", k=3, trained_until="2016-01-01")
+    with TestClient(create_app(settings(bundle, tmp_path / "db.sqlite"))) as c:
+        svc: Service = c.app.state.service  # type: ignore[attr-defined]
+        svc.profiles.score = lambda well, f: np.full(len(f), 0.97)  # type: ignore[method-assign]
+        r = c.post("/ingest", json=payload(raw_instance(60 * 9)), headers=KEY)
+        assert [a for a in r.json()["alerts"] if a["source"] == "chronic"] == []
+        info = c.get("/wells/WELL-T/profile").json()
+        assert info["has_profile"] and info["expires"].startswith("2016-06-29")

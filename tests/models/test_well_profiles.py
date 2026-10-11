@@ -80,3 +80,20 @@ def test_partial_labels_are_deterministic() -> None:
     a = prequential(windows, instances, FEATURES, label_frac=0.5, seed=3)
     b = prequential(windows, instances, FEATURES, label_frac=0.5, seed=3)
     pd.testing.assert_frame_equal(a, b)
+
+
+def test_stale_profiles_are_not_used_until_refitted() -> None:
+    windows, instances = dataset([
+        ("r1", "W", "2020-01-01 00:00", 0),
+        ("r2", "W", "2020-01-01 03:00", UNSTABLE),
+        ("r3", "W", "2020-01-02 00:00", UNSTABLE),  # profile from r1 + r2, one day old
+        ("r4", "W", "2021-06-01 00:00", 0),  # 17 months later: too old, but r3 is newer...
+    ])  # fmt: skip
+    first = (
+        prequential(windows, instances, FEATURES, max_age_days=30)
+        .groupby("instance_id")["has_profile"]
+        .first()
+    )
+    assert first["r3"] and not first["r4"]  # ...r3 alone has no normal data: refit fails
+    no_limit = prequential(windows, instances, FEATURES).groupby("instance_id")["has_profile"]
+    assert no_limit.first()["r4"]

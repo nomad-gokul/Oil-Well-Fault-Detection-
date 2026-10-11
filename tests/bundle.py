@@ -84,7 +84,14 @@ def _write_manifest(out: Path, members: list[dict[str, object]]) -> Path:
     return out
 
 
-def add_profile(bundle: Path, well_id: str, threshold: float = 0.8, k: int = 3) -> Path:
+def add_profile(
+    bundle: Path,
+    well_id: str,
+    threshold: float = 0.8,
+    k: int = 3,
+    trained_until: str = "2020-01-01",
+    max_age_days: float | None = 180.0,
+) -> Path:
     """Give ``well_id`` a (random) flow-instability profile in an existing bundle."""
     names = all_feature_names(VARS)
     rng = np.random.default_rng(5)
@@ -96,8 +103,9 @@ def add_profile(bundle: Path, well_id: str, threshold: float = 0.8, k: int = 3) 
     manifest = json.loads((bundle / "manifest.json").read_text())
     manifest["chronic"] = {
         "threshold": threshold, "k": k, "class": 4, "features": names,
+        "max_age_days": max_age_days,
         "profiles": {well_id: {"file": f"{well_id}.json", "source_well": "WELL-X",
-                               "trained_until": "2020-01-01", "unstable_windows": 100,
+                               "trained_until": trained_until, "unstable_windows": 100,
                                "normal_windows": 100}},
     }  # fmt: skip
     (bundle / "manifest.json").write_text(json.dumps(manifest))

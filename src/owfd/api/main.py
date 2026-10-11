@@ -253,6 +253,8 @@ class Service:
         chronic alert; opened alerts carry the profile's top drivers."""
         if not preds or not self.profiles.has(well_id) or preds[0].inputs is None:
             return []
+        if not self.profiles.active(well_id, preds[-1].timestamp):
+            return []  # profile too old for this data: the well's normal may have changed
         x, base, blocks = (np.stack([p.inputs[i] for p in preds if p.inputs]) for i in range(3))
         feats = self.predictor.features(x, base, blocks)
         p_unstable = self.profiles.score(well_id, feats)
@@ -631,7 +633,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def well_profile(well_id: str, svc: Svc) -> dict[str, Any]:
         """Whether the well has a flow-instability profile, and what it was trained on."""
         info = svc.profiles.info(well_id)
-        return {"well_id": well_id, "has_profile": info is not None, **(info or {})}
+        out: dict[str, Any] = {"well_id": well_id, "has_profile": info is not None, **(info or {})}
+        if info is not None:
+            max_age = svc.profiles.section.get("max_age_days")
+            out["max_age_days"] = max_age
+            if max_age is not None and not info.get("age_checked_at_build"):
+                expires = pd.Timestamp(info["trained_until"]) + pd.Timedelta(days=float(max_age))
+                out["expires"] = str(expires)
+        return out
 
     @app.get("/wells", response_model=list[str], tags=["stream"])
     def wells(svc: Svc) -> list[str]:
