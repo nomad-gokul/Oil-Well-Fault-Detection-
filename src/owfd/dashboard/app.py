@@ -58,11 +58,15 @@ def _demo_scenarios() -> dict[str, dict]:
 
 def demo_scenarios() -> dict[str, dict]:
     """What each bundled demo well replays: true fault class and the real 3W well it comes
-    from (``GET /demo``). Empty when the API is unreachable (errors are not cached)."""
+    from (``GET /demo``). Empty when the API is unreachable or does not report it yet; errors
+    and empty answers are not cached, so a redeployed API is picked up on the next refresh."""
     try:
-        return _demo_scenarios()
+        scenarios = _demo_scenarios()
     except (ApiUnavailableError, httpx.HTTPStatusError):
         return {}
+    if not scenarios:
+        _demo_scenarios.clear()
+    return scenarios
 
 
 def api_down(exc: Exception) -> None:
