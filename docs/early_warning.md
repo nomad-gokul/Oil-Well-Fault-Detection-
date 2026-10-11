@@ -71,7 +71,8 @@ more), and minutes for fast ones.
 
 - **The test split is easier than average.** Across all 40 wells (cross-validation) about one
   in four fault episodes is detected at about one false alarm per day, mostly because of flow
-  instability on two chronically unstable wells; excluding flow instability, 55%. Details and
+  instability on two chronically unstable wells; excluding flow instability, 55%; excluding flow
+  instability and severe slugging, 66% (test wells: 65%, 20 of 31). Details and
   95% intervals: [cross_validation.md](cross_validation.md).
 - **Per-well thresholds are not a detection lever.** They were chosen here because they gave the
   best selection-set score, but in cross-validation they did not raise detection on average.

@@ -29,10 +29,18 @@ chosen without the test wells; test numbers are reported once.
 | 10-class macro F1 per window | 0.46 | |
 | Fault episodes detected by the alert rule | **52%** at 1.8 false alarms / day | 31% at 1 / day, 43% at 3 / day (pooled) |
 | ... excluding flow instability | 37% (31 of 62 are slugging on one well) | 55% |
+| **... excluding flow instability and severe slugging** | **65%** (20 of 31) | **66%** (71 of 107; 95% CI 51–81%) |
 | Always caught (test) | DHSV closure, PCK scaling, production-line hydrate | DHSV closure: 100% |
 | Median delay after fault onset | 4 min | 7 min |
 | Median warning before the fault reaches steady state | 307 min | 173 min |
 | `/predict` latency (one 5-min window, CPU, incl. SHAP) | 28 ms median | |
+
+Flow instability and severe slugging are oscillating flow conditions rather than sudden
+events, and they make up 95 of the 126 test episodes and 375 of the 482 overall. On the other
+seven fault types (valve closure, choke restriction and scaling, hydrates, productivity loss,
+water rise) the same model and alert rule catch about two in three episodes on both the test
+wells and across all 40 wells; false alarms are unchanged, since only the set of fault episodes
+being scored differs. Oscillating conditions are covered by the per-well profiles below.
 
 The two columns differ a lot, and that is the main lesson of the evaluation: the 10 test
 wells are easier than average. Across all 40 wells (5-fold cross-validation by well with 95%
