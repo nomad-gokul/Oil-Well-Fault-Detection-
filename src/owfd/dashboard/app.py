@@ -6,8 +6,10 @@ controls), read from Streamlit secrets (Community Cloud) or else environment var
 
 from __future__ import annotations
 
+import html
 import os
 import sys
+from collections import Counter
 from pathlib import Path
 
 try:  # running from a plain checkout (e.g. Streamlit Community Cloud): make src/ importable
@@ -23,18 +25,19 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 from owfd.dashboard.client import (  # noqa: E402
+    LEVELS,
     ApiUnavailableError,
     Client,
     display_units,
+    fault_text,
+    plain_status,
     scenario_caption,
     scenario_source,
-    well_status,
 )
 
 st.set_page_config(page_title="Oil Well Fault Detection", page_icon="🛢️", layout="wide")
 
-COLORS = {"Fault": "#c0392b", "Warning": "#e67e22", "Normal": "#27ae60", "No data": "#7f8c8d"}
-SEVERITY_ICON = {"high": "🔴", "medium": "🟠", "low": "🟡"}
+SEVERITY_LEVEL = {"high": "critical", "medium": "warning", "low": "watch"}
 
 
 def setting(name: str) -> str | None:
@@ -84,17 +87,19 @@ def sidebar() -> dict | None:
     except ApiUnavailableError as exc:
         api_down(exc)
         return None
-    st.sidebar.success(f"API online · model `{health['model']}` · v{health['model_version']}")
+    st.sidebar.success("System online")
     rule = model["alert"]
     per_well = (
         " (raised per well after a one-hour burn-in)"
         if rule.get("burnin_quantile") is not None
         else ""
     )
-    st.sidebar.caption(
-        f"Alert when P(fault) > {rule['threshold']:.2f}{per_well} for "
-        f"{int(rule['k'])} consecutive minutes"
-    )
+    with st.sidebar.expander("Technical details"):
+        st.caption(
+            f"Model `{health['model']}` · v{health['model_version']}. Alert when "
+            f"P(fault) > {rule['threshold']:.2f}{per_well} for {int(rule['k'])} consecutive "
+            "minutes."
+        )
     st.sidebar.divider()
     st.sidebar.subheader("Demo replay")
     st.sidebar.caption("Replays held-out real wells from the 3W test set, sped up.")
@@ -125,52 +130,106 @@ def sidebar() -> dict | None:
     return model
 
 
-@st.fragment(run_every=2)
-def fleet(model: dict) -> None:
+def wells_text(n: int) -> str:
+    """``"1 well needs"`` / ``"3 wells need"``."""
+    return "1 well needs" if n == 1 else f"{n} wells need"
+
+
+def card(well: str, state: dict, note: str = "") -> str:
+    """One well's status as an HTML card: level badge, what is happening, what it means and
+    what to do. Colours are translucent so the card reads in light and dark themes."""
+    label, _, color, _ = LEVELS[state["level"]]
+    esc = html.escape
+    since = [f"for {state['duration']}"] if state["duration"] else []
+    if state["acknowledged"]:
+        since.append("seen by an operator")
+    if state["more"]:
+        since.append(f"+{state['more']} more issue{'s' if state['more'] > 1 else ''} (see Alerts)")
+    lines = [
+        "<div style='display:flex;justify-content:space-between;align-items:center;gap:8px'>"
+        f"<span style='font-weight:700;font-size:1.05rem'>{esc(well)}</span>"
+        f"<span style='background:{color};color:#fff;border-radius:999px;padding:2px 10px;"
+        f"font-size:.78rem;font-weight:700;letter-spacing:.04em'>{label.upper()}</span></div>",
+        f"<div style='font-size:1.12rem;font-weight:600;margin-top:6px'>"
+        f"{esc(state['headline'])}</div>",
+    ]
+    if since:
+        lines.append(f"<div style='opacity:.75;font-size:.85rem'>{esc(' · '.join(since))}</div>")
+    if state["level"] not in ("normal", "no_data"):
+        lines.append(f"<div style='margin-top:6px;font-size:.92rem'>{esc(state['meaning'])}</div>")
+    if state["action"]:
+        lines.append(
+            f"<div style='margin-top:6px;font-size:.92rem'><b>What to do:</b> "
+            f"{esc(state['action'])}</div>"
+        )
+    if note:
+        lines.append(f"<div style='opacity:.6;font-size:.75rem;margin-top:8px'>{esc(note)}</div>")
+    return (
+        f"<div style='border-left:6px solid {color};background:{color}1a;border-radius:8px;"
+        f"padding:12px 14px;margin-bottom:12px'>{''.join(lines)}</div>"
+    )
+
+
+@st.fragment(run_every=3)
+def overview(model: dict) -> None:
+    """Every well's current state in plain words, worst first."""
     try:
         wells = client().wells()
-        active = client().alerts(status=None, limit=500)
+        alerts = client().alerts(limit=500)
+        latest = {well: client().predictions(well, limit=1) for well in wells}
     except ApiUnavailableError as exc:
         api_down(exc)
         return
     if not wells:
-        st.info("No wells are streaming yet. Start the demo replay in the sidebar.")
+        st.info("No wells are reporting yet. Start the demo replay in the sidebar.")
         return
     threshold = model["alert"]["threshold"]
-    unresolved = active[active["status"].isin(["open", "acknowledged"])] if len(active) else active
-    chronic = (
-        set(unresolved.loc[unresolved["source"] == "chronic", "well_id"])
-        if len(unresolved) and "source" in unresolved
-        else set()
-    )
-    scenarios = demo_scenarios()
-    cols = st.columns(4)
-    for i, well in enumerate(wells):
-        preds = client().predictions(well, limit=1)
+    records = alerts.to_dict("records") if len(alerts) else []
+    states = []
+    for well in wells:
+        preds = latest[well]
         p = float(preds["p_fault"].iloc[-1]) if len(preds) else None
-        alert = unresolved[unresolved["well_id"] == well].head(1) if len(unresolved) else unresolved
-        a = alert.iloc[0] if len(alert) else None
-        status = well_status(p, threshold, a["status"] if a is not None else None)
-        with cols[i % 4].container(border=True):
-            st.markdown(
-                f"**{well}**  \n<span style='color:{COLORS[status]};font-weight:700'>"
-                f"● {status}</span>",
-                unsafe_allow_html=True,
+        now = preds["timestamp"].iloc[-1] if len(preds) else None
+        mine = [a for a in records if a["well_id"] == well]
+        states.append((well, plain_status(mine, p, threshold, now)))
+    order = list(LEVELS)
+    states.sort(key=lambda ws: (order.index(ws[1]["level"]), ws[0]))
+
+    counts = Counter(state["level"] for _, state in states)
+    urgent = counts["critical"] + counts["warning"]
+    if counts["critical"]:
+        headline = f"{wells_text(counts['critical'])} action now"
+    elif urgent:
+        headline = f"{wells_text(urgent)} checking today"
+    elif counts["watch"]:
+        headline = "No serious faults. Some wells to keep an eye on"
+    else:
+        headline = "All wells are working normally"
+    st.subheader(headline)
+    shown = [lvl for lvl in order if lvl != "no_data" or counts[lvl]]
+    for col, lvl in zip(st.columns(len(shown)), shown, strict=True):
+        label, icon, _, _ = LEVELS[lvl]
+        col.metric(f"{icon} {label}", counts[lvl])
+
+    scenarios = demo_scenarios()
+    for start in range(0, len(states), 3):
+        cols = st.columns(3)
+        for col, (well, state) in zip(cols, states[start : start + 3], strict=False):
+            note = scenario_caption(scenarios[well]) if well in scenarios else ""
+            col.markdown(
+                card(well, state, f"Demo · {note}" if note else ""), unsafe_allow_html=True
             )
-            if well in scenarios:  # demo replay: the real source well and its true condition
-                st.caption(f"🛢️ {scenario_caption(scenarios[well])}")
-            if well in chronic:
-                st.caption("〰️ Chronic instability (well profile)")
-            if a is not None:
-                st.caption(
-                    f"{SEVERITY_ICON.get(a['severity'], '')} Alarm: {a['class_name']} · "
-                    f"peak P={a['peak_probability']:.2f}"
-                )
-            elif len(preds):
-                cls = model["classes"][str(int(preds["predicted_class"].iloc[-1]))]
-                st.caption(f"Model: {cls} · P(fault)={p:.2f}")
-            if p is not None:
-                st.progress(min(max(p, 0.0), 1.0))
+
+    with st.expander("What do the levels mean?"):
+        st.markdown(
+            "\n".join(
+                f"- {icon} **{label}**: {meaning}" for label, icon, _, meaning in LEVELS.values()
+            )
+        )
+        st.caption(
+            "A well's level comes from its most serious open alert. Alerts are raised "
+            "automatically from the well's sensors (pressures, temperatures, flows) every minute."
+        )
 
 
 @st.fragment(run_every=3)
@@ -195,6 +254,13 @@ def well_detail(model: dict, well: str) -> None:
     if preds.empty:
         st.info("No predictions yet for this well.")
         return
+    state = plain_status(
+        alerts.to_dict("records") if len(alerts) else [],
+        float(preds["p_fault"].iloc[-1]),
+        model["alert"]["threshold"],
+        preds["timestamp"].iloc[-1],
+    )
+    st.markdown(card(well, state), unsafe_allow_html=True)
     sensors, units = display_units(readings)
     shown = [c for c in sensors.columns if sensors[c].notna().sum() > 1]
     rows = len(shown) + 1
@@ -281,11 +347,11 @@ def alerts_tab() -> None:
     st.subheader(f"Open alerts ({len(open_)})")
     for _, a in open_.iterrows():
         c = st.columns([5, 1, 1, 1])
-        chronic = a.get("source") == "chronic"
+        label, icon, _, _ = LEVELS[SEVERITY_LEVEL.get(a["severity"], "warning")]
+        headline, _, action = fault_text(int(a["event_class"]), a["class_name"], a.get("source"))
         c[0].markdown(
-            f"{SEVERITY_ICON.get(a['severity'], '')} **{a['well_id']}** — "
-            f"{a['class_name']}{' (chronic, well profile)' if chronic else ''} · "
-            f"opened {a['opened_at']:%Y-%m-%d %H:%M} · peak P={a['peak_probability']:.2f}"
+            f"{icon} **{a['well_id']}**: {headline} ({label.lower()}) · since "
+            f"{a['opened_at']:%Y-%m-%d %H:%M}  \n{action}"
         )
         if c[1].button("Acknowledge", key=f"ack{a['id']}"):
             try:
@@ -386,13 +452,16 @@ def system_tab() -> None:
 
 def main() -> None:
     model = sidebar()
-    st.title("Oil Well Fault Detection — live alerts")
+    st.title("Oil well monitor")
+    st.caption("Which wells have a problem right now, how serious it is, and what to do.")
     if model is None:
         st.stop()
-    tabs = st.tabs(["Fleet", "Well detail", "Alerts", "Model", "System"])
+    tabs = st.tabs(["Overview", "Alerts", "Sensor charts", "Model", "System"])
     with tabs[0]:
-        fleet(model)
+        overview(model)
     with tabs[1]:
+        alerts_tab()
+    with tabs[2]:
         try:
             wells = client().wells()
         except ApiUnavailableError:
@@ -401,8 +470,6 @@ def main() -> None:
             well_detail(model, st.selectbox("Well", wells))
         else:
             st.info("No wells yet.")
-    with tabs[2]:
-        alerts_tab()
     with tabs[3]:
         model_tab(model)
     with tabs[4]:

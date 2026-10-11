@@ -87,7 +87,7 @@ Results with the 180-day limit:
   profiles end in 2017–2018, so on live data today they are expired until refreshed with new
   labels, which is the intended behaviour.
 - Chronic alerts are stored and shown like other alerts, with `source: "chronic"`, the profile's
-  top SHAP drivers, and a badge on the dashboard's fleet view.
+  top SHAP drivers; the dashboard's overview shows them as "Long-running unstable flow".
 - **Feedback loop:** `POST /alerts/{id}/feedback` (confirmed / false_alarm / flow_instability)
   and the dashboard's *Confirm* and *False alarm* buttons store operator verdicts
   (`GET /feedback`); they are the labels the next `python -m owfd.models.well_profiles build`

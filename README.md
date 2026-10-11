@@ -11,7 +11,12 @@ live **Streamlit** alert dashboard.
 [API docs](https://owfd-api-production.up.railway.app/docs) (10 held-out real wells replayed at 30x
 speed; the first load may take a minute while the services wake up)
 
-![Live dashboard: fleet view](docs/figures/dashboard_fleet.png)
+![Live dashboard: overview](docs/figures/dashboard_fleet.png)
+
+The dashboard opens on a plain-language overview for non-specialists: every well with a
+colour-coded level (Critical / Warning / Watch / Normal), what is happening in everyday
+words, for how long, and what to do. Sensor charts, model details and SHAP explanations
+are in the other tabs.
 
 ## Results on wells the model never saw
 
@@ -166,7 +171,7 @@ configs/       YAML settings, split manifest, serving choice
 deploy/bundle/ production model bundle (< 1 MB)
 demo_data/     10 held-out test scenarios for the live demo (2 MB)
 docs/          data report, results, early warning, monitoring, performance, deployment, model card
-tests/         162 tests (unit, integration, API, dashboard) + a Locust load test
+tests/         171 tests (unit, integration, API, dashboard) + a Locust load test
 ```
 
 ## Tech stack
