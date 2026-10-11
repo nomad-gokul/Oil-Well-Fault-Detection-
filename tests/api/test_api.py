@@ -256,7 +256,26 @@ def test_rate_limit_returns_429(bundle: Path, tmp_path: Path) -> None:
 def test_in_memory_database_creates_no_file(bundle: Path, tmp_path: Path) -> None:
     from owfd.config import PROJECT_ROOT
 
-    s = Settings(serving_bundle=bundle, database_url="sqlite:///:memory:")
+    s = Settings(serving_bundle=bundle, database_url="sqlite:///:memory:", api_key="secret")
     with TestClient(create_app(s)) as c:
         assert c.get("/health").status_code == 200
+        # Request threads must see the tables created at startup (one shared connection).
+        c.post("/ingest", json=payload(raw_instance(400)), headers=KEY)
+        assert c.get("/alerts").status_code == 200
+        assert len(c.get("/wells/WELL-T/predictions").json()) == 2
     assert not (PROJECT_ROOT / ":memory:").exists()
+
+
+def test_json_log_lines_keep_tracebacks() -> None:
+    import json
+    import logging
+    import sys
+
+    from owfd.api.main import JsonFormatter
+
+    try:
+        raise ValueError("boom")
+    except ValueError:
+        record = logging.LogRecord("x", logging.ERROR, __file__, 1, "failed", None, sys.exc_info())
+    line = json.loads(JsonFormatter().format(record))
+    assert line["msg"] == "failed" and "ValueError: boom" in line["exc_info"]
