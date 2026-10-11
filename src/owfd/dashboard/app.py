@@ -118,6 +118,11 @@ def fleet(model: dict) -> None:
         return
     threshold = model["alert"]["threshold"]
     unresolved = active[active["status"].isin(["open", "acknowledged"])] if len(active) else active
+    chronic = (
+        set(unresolved.loc[unresolved["source"] == "chronic", "well_id"])
+        if len(unresolved) and "source" in unresolved
+        else set()
+    )
     cols = st.columns(4)
     for i, well in enumerate(wells):
         preds = client().predictions(well, limit=1)
@@ -131,6 +136,8 @@ def fleet(model: dict) -> None:
                 f"● {status}</span>",
                 unsafe_allow_html=True,
             )
+            if well in chronic:
+                st.caption("〰️ Chronic instability (well profile)")
             if a is not None:
                 st.caption(
                     f"{SEVERITY_ICON.get(a['severity'], '')} {a['class_name']} · "
@@ -240,11 +247,12 @@ def alerts_tab() -> None:
     open_ = df[df["status"] == "open"]
     st.subheader(f"Open alerts ({len(open_)})")
     for _, a in open_.iterrows():
-        c = st.columns([5, 1])
+        c = st.columns([5, 1, 1, 1])
+        chronic = a.get("source") == "chronic"
         c[0].markdown(
             f"{SEVERITY_ICON.get(a['severity'], '')} **{a['well_id']}** — "
-            f"{a['class_name']} · opened {a['opened_at']:%Y-%m-%d %H:%M} · "
-            f"peak P={a['peak_probability']:.2f}"
+            f"{a['class_name']}{' (chronic, well profile)' if chronic else ''} · "
+            f"opened {a['opened_at']:%Y-%m-%d %H:%M} · peak P={a['peak_probability']:.2f}"
         )
         if c[1].button("Acknowledge", key=f"ack{a['id']}"):
             try:
@@ -252,6 +260,16 @@ def alerts_tab() -> None:
                 st.rerun()
             except httpx.HTTPStatusError:
                 st.error("Acknowledging needs OWFD_API_KEY")
+        # Operator verdicts become labels for the next well-profile build.
+        for col, (label, text) in zip(
+            c[2:], (("confirmed", "Confirm"), ("false_alarm", "False alarm")), strict=True
+        ):
+            if col.button(text, key=f"{label}{a['id']}"):
+                try:
+                    client().feedback(int(a["id"]), label)
+                    st.toast(f"Recorded: {text.lower()} for alert {a['id']}")
+                except httpx.HTTPStatusError:
+                    st.error("Feedback needs OWFD_API_KEY")
     st.subheader("History")
     f1, f2 = st.columns(2)
     status = f1.multiselect(

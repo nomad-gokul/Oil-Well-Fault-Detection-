@@ -279,3 +279,62 @@ def test_json_log_lines_keep_tracebacks() -> None:
         record = logging.LogRecord("x", logging.ERROR, __file__, 1, "failed", None, sys.exc_info())
     line = json.loads(JsonFormatter().format(record))
     assert line["msg"] == "failed" and "ValueError: boom" in line["exc_info"]
+
+
+def test_chronic_alerts_feedback_and_profile(tmp_path: Path) -> None:
+    from tests.bundle import add_profile
+
+    bundle = add_profile(build_bundle(tmp_path / "b", context=True), "WELL-T", k=3)
+    with TestClient(create_app(settings(bundle, tmp_path / "db.sqlite"))) as c:
+        svc: Service = c.app.state.service  # type: ignore[attr-defined]
+        assert c.get("/wells/WELL-T/profile").json()["has_profile"] is True
+        assert c.get("/wells/other/profile").json()["has_profile"] is False
+        assert c.get("/model").json()["chronic"]["wells"] == ["WELL-T"]
+        svc.profiles.score = lambda well, f: np.full(len(f), 0.97)  # type: ignore[method-assign]
+        r = c.post("/ingest", json=payload(raw_instance(60 * 9)), headers=KEY)
+        assert r.status_code == 200, r.text
+        chronic = [a for a in r.json()["alerts"] if a["source"] == "chronic"]
+        assert chronic and chronic[0]["class_name"] == "Flow Instability"
+        assert len(chronic[0]["top_drivers"]) == 5
+        alert_id = chronic[0]["id"]
+        # Acknowledge goes to the chronic engine's live alert.
+        assert c.post(f"/alerts/{alert_id}/ack", headers=KEY).json()["status"] == "acknowledged"
+        assert svc.chronic.active("WELL-T").status == "acknowledged"
+        # Operator feedback is stored and listed.
+        body = {"label": "confirmed", "note": "unstable since 10:00"}
+        assert c.post(f"/alerts/{alert_id}/feedback", json=body).status_code == 401
+        fb = c.post(f"/alerts/{alert_id}/feedback", json=body, headers=KEY).json()
+        assert fb["label"] == "confirmed" and fb["well_id"] == "WELL-T"
+        assert c.post(f"/alerts/{alert_id}/feedback", json={"label": "maybe"},
+                      headers=KEY).status_code == 422  # fmt: skip
+        assert c.post("/alerts/999/feedback", json=body, headers=KEY).status_code == 404
+        assert [f["alert_id"] for f in c.get("/feedback").json()] == [alert_id]
+    # After a restart the open chronic alert is restored into the chronic engine only.
+    with TestClient(create_app(settings(bundle, tmp_path / "db.sqlite"))) as c:
+        svc = c.app.state.service  # type: ignore[attr-defined]
+        restored = svc.chronic.active("WELL-T")
+        assert restored is not None and restored.source == "chronic" and restored.id == alert_id
+        onset = svc.alerts.active("WELL-T")
+        assert onset is None or onset.source == "onset"
+
+
+def test_old_database_gets_the_source_column(tmp_path: Path) -> None:
+    import sqlite3
+
+    from owfd.api.db import make_engine
+
+    db = tmp_path / "old.sqlite"
+    con = sqlite3.connect(db)
+    con.execute(
+        "CREATE TABLE alerts (id INTEGER PRIMARY KEY, well_id VARCHAR(64), event_class INTEGER, "
+        "severity VARCHAR(16), status VARCHAR(16), opened_at DATETIME, acknowledged_at DATETIME, "
+        "resolved_at DATETIME, peak_probability FLOAT, top_drivers JSON)"
+    )
+    con.execute("INSERT INTO alerts VALUES (1, 'w', 8, 'high', 'open', '2020-01-01 00:00:00', "
+                "NULL, NULL, 0.9, NULL)")  # fmt: skip
+    con.commit()
+    con.close()
+    from owfd.api.db import Store
+
+    store = Store(make_engine(f"sqlite:///{db}"))
+    assert store.get_alert(1)[0].source == "onset"

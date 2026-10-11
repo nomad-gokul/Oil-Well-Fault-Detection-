@@ -31,11 +31,18 @@ def main() -> None:
             member["file"] += ".gz"
             data = gzip.compress(data, compresslevel=9, mtime=0)  # reproducible bytes
         (OUT / member["file"]).write_bytes(data)
+    chronic = manifest.get("chronic")
+    if chronic:  # per-well instability profiles, gzipped like the main model
+        (OUT / "profiles").mkdir()
+        for meta in chronic["profiles"].values():
+            data = gzip.compress((src / "profiles" / meta["file"]).read_bytes(), 9, mtime=0)
+            meta["file"] += ".gz"
+            (OUT / "profiles" / meta["file"]).write_bytes(data)
     for name in ("scaler.json", "reference.json"):
         if (src / name).exists():
             shutil.copy(src / name, OUT / name)
     (OUT / "manifest.json").write_text(json.dumps(manifest, indent=1) + "\n")
-    size = sum(p.stat().st_size for p in OUT.iterdir())
+    size = sum(p.stat().st_size for p in OUT.rglob("*") if p.is_file())
     where = OUT.relative_to(ROOT)
     print(f"{manifest['version']} ({manifest['model']}) -> {where} ({size / 1e6:.1f} MB)")
 

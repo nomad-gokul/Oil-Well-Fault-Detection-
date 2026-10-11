@@ -55,6 +55,17 @@ error 0.070 after temperature scaling.
 Previous model (5-minute features only): 56% on test at 2.9 false alarms / day; in
 cross-validation 6–8 points lower detection than this model at equal false-alarm rates.
 
+## Chronic-instability profiles (second, per-well model)
+
+Wells with labelled history also have a small per-well model for flow instability (7 real wells
+in the bundle), raising separate "chronic" alerts at P(unstable) > 0.8 for 20 minutes. Replaying
+every well's history in time order, with each recording scored only by a profile trained on that
+well's earlier recordings: 81% of unstable episodes caught (93% once a well has a profile) at
+0.34 extra false alarms per day on those wells; the whole system then catches 78% of the 482
+fault episodes across 40 wells (onset model alone: 27%). It tracks continuing instability (329
+of 343 episodes) and catches only 4 of 14 new onsets; it needs operator labels. Details:
+[chronic_instability.md](chronic_instability.md).
+
 ## Known failure modes
 
 - **Chronic flow instability** is rarely detected across wells (16% in cross-validation): two

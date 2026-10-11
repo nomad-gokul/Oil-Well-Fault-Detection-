@@ -37,6 +37,24 @@ minute of every recording, so there is no "normal" to deviate from). Sudden, wel
 are caught reliably. Details: [docs/cross_validation.md](docs/cross_validation.md),
 [docs/early_warning.md](docs/early_warning.md), [docs/model_card.md](docs/model_card.md).
 
+### Chronic instability: per-well profiles from operator labels
+
+Flow instability cannot be learned across wells (a dedicated detector reaches window AUC 0.57
+on unseen wells) but is almost perfectly separable *within* a well. So each well with labelled
+history gets a small profile model that raises a separate "chronic instability" alert, and
+operator feedback in the dashboard supplies the labels. Replaying every well's history in time
+order (each recording scored only by a profile trained on that well's *earlier* recordings):
+
+| All 40 wells | Fault episodes caught | False alarms / day |
+|---|---:|---:|
+| Onset model only | 27% | 2.6 |
+| + per-well profiles, every past recording labelled | **78%** | 2.7 |
+| + per-well profiles, 25% of past recordings labelled | 52% | 3.1 |
+
+It tracks a known, long-running condition (329 of 343 unstable episodes continue an unstable
+recording); it does not discover a well's first instability (4 of 14 new onsets). Details:
+[docs/chronic_instability.md](docs/chronic_instability.md).
+
 ## How it works
 
 ```mermaid
@@ -45,6 +63,8 @@ flowchart LR
     subgraph API [FastAPI service]
       P[Streaming predictor<br/>clean, scale, 5-min window<br/>+ 30/120-min context,<br/>237 features, XGBoost] --> A[Alert engine<br/>per-well threshold,<br/>k consecutive minutes,<br/>hysteresis, cool-down]
       P --> X[SHAP drivers]
+      P --> C[Per-well instability<br/>profiles: chronic alerts]
+      C --> A
       A --> DB[(SQLite / Postgres)]
       P --> M[metrics and drift]
     end
@@ -102,6 +122,7 @@ python -m owfd.models.train_xgb --config configs/xgb_tuned.yaml --name xgb_ctx
 python -m owfd.models.train_dl --arch cnn            # optional comparison (CPU: ~30 min)
 python -m owfd.models.tune --model xgb --trials 15   # optional
 python -m owfd.models.cv --model artifacts/xgb/xgb_ctx-<version>   # CV by well (~30 min)
+python -m owfd.models.well_profiles evaluate && python -m owfd.models.well_profiles build
 python -m owfd.models.evaluate --select-on cv --models artifacts/xgb/xgb_ctx-<version>
                                         # early-warning evaluation, writes configs/serving.yaml
 python -m owfd.models.explain --model artifacts/xgb/xgb_ctx-<version>   # SHAP per class
@@ -117,7 +138,9 @@ Experiments are tracked in MLflow (`mlflow ui --backend-store-uri sqlite:///mlfl
 |---|---|
 | `POST /predict` | score a 5-minute window (300 readings): class probabilities, P(fault), top SHAP drivers |
 | `POST /ingest` 🔑 | stream readings for a well: predictions every minute + alert changes |
-| `GET /alerts`, `POST /alerts/{id}/ack` 🔑 | alert history with filters; acknowledge |
+| `GET /alerts`, `POST /alerts/{id}/ack` 🔑 | alert history with filters (onset and chronic); acknowledge |
+| `POST /alerts/{id}/feedback` 🔑, `GET /feedback` | operator verdicts (confirmed / false alarm / flow instability): labels for well profiles |
+| `GET /wells/{id}/profile` | whether the well has a chronic-instability profile, and its training data |
 | `GET /wells/{id}/predictions`, `/wells/{id}/readings` | recent history for charts |
 | `WS /ws/{well_id}` (or `all`) | live predictions and alerts |
 | `GET /monitoring/drift`, `GET /metrics` | fleet drift check, Prometheus metrics |
@@ -132,8 +155,8 @@ src/owfd/
   data/        download, load, profile, clean, split, windows (incl. stream baseline)
   features/    125 vectorised window features
   features/    5-minute window statistics + 30/120-minute context features
-  models/      train_xgb, train_dl, nets, tune, evaluate, cv, explain, export, metrics
-  inference/   predictor (streaming, PyTorch-free), alerting
+  models/      train_xgb, train_dl, nets, tune, evaluate, cv, well_profiles, explain, export
+  inference/   predictor (streaming, PyTorch-free), alerting, per-well profiles
   api/         FastAPI app, schemas, persistence
   dashboard/   Streamlit app + API client
   simulator/   replay of 3W instances as live wells; demo-set builder
@@ -142,7 +165,7 @@ configs/       YAML settings, split manifest, serving choice
 deploy/bundle/ production model bundle (< 1 MB)
 demo_data/     10 held-out test scenarios for the live demo (2 MB)
 docs/          data report, results, early warning, monitoring, performance, deployment, model card
-tests/         151 tests (unit, integration, API, dashboard) + a Locust load test
+tests/         159 tests (unit, integration, API, dashboard) + a Locust load test
 ```
 
 ## Tech stack
@@ -157,8 +180,9 @@ Docker · GitHub Actions · Railway / Render · Streamlit Community Cloud
   episodes is caught at about one false alarm per day; the 10 test wells (52%) are easier than
   average. Rare classes have 1–3 real test instances; per-class scores for them are noisy.
 - **Chronic flow instability** (71% of all fault episodes, mostly on two wells that are unstable
-  from the first minute) is rarely detected: there is no normal period to compare against.
-  Flagging chronically unstable wells, rather than detecting an onset, would suit it better.
+  from the first minute) is rarely detected by the onset model. Per-well profiles from operator
+  labels track it once a well has labelled history (78% system-wide), but a well's *first*
+  instability is still mostly missed.
 - **Severe slugging is learned almost only from simulations** (31 of 32 real episodes come from
   one well) and is mostly missed: a measured sim-to-real gap.
 - The model detects *that* something is wrong earlier than it can tell *what*: during a

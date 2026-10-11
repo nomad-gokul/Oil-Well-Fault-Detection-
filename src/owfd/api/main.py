@@ -39,6 +39,8 @@ from owfd.api.schemas import (
     AlertOut,
     Driver,
     ErrorOut,
+    FeedbackIn,
+    FeedbackOut,
     HealthOut,
     IngestRequest,
     IngestResponse,
@@ -51,6 +53,7 @@ from owfd.config import Settings, get_settings
 from owfd.data.schema import CLASS_NAMES
 from owfd.inference.alerting import Alert, AlertConfig, AlertEngine, AlertEvent
 from owfd.inference.predictor import Prediction, Predictor, StreamingPredictor
+from owfd.inference.profiles import WellProfiles
 
 logger = logging.getLogger("owfd.api")
 
@@ -135,12 +138,21 @@ class Service:
         self.version: str = self.manifest["version"]
         alerts_file = settings.resolve(settings.alerts_file)
         self.alerts = AlertEngine(AlertConfig.from_files(self.manifest["alert"], alerts_file))
+        # Per-well flow-instability profiles ("chronic" alerts), if the bundle has any.
+        self.profiles = WellProfiles.from_manifest(self.bundle, self.manifest)
+        chronic = self.manifest.get("chronic") or {}
+        chronic_rule = {"threshold": chronic.get("threshold", 0.8), "k": chronic.get("k", 20)}
+        self.chronic = AlertEngine(
+            AlertConfig.from_files(chronic_rule, alerts_file), source="chronic"
+        )
         db_url = settings.database_url
         relative_sqlite = db_url.startswith("sqlite:///") and not db_url.startswith("sqlite:////")
         if relative_sqlite and db_url != "sqlite:///:memory:":
             db_url = f"sqlite:///{settings.resolve(Path(db_url.removeprefix('sqlite:///')))}"
         self.store = Store(make_engine(db_url))
-        self.alerts.restore(self.store.unresolved_alerts())
+        unresolved = self.store.unresolved_alerts()
+        self.alerts.restore(unresolved)
+        self.chronic.restore(unresolved)
         self.explainer = self._explainer()
         self.subscribers: dict[str, set[WebSocket]] = defaultdict(set)
         self.started = time.time()
@@ -202,21 +214,23 @@ class Service:
         """Score new readings, update alerts, persist, notify and broadcast."""
         async with self.lock:
             self.remember(well_id, df)
-            preds = self.stream.update(well_id, df, keep_inputs=self.explainer is not None)
+            keep = self.explainer is not None or self.profiles.has(well_id)
+            preds = self.stream.update(well_id, df, keep_inputs=keep)
             self.store.save_predictions(preds, self.version)
-            events: list[AlertEvent] = []
+            events: list[tuple[AlertEvent, list[dict[str, Any]] | None]] = []
             for p in preds:
-                events += self.alerts.process(p)
+                for ev in self.alerts.process(p):
+                    drivers = None
+                    if ev.kind == "opened":
+                        p.predicted_class = ev.alert.event_class  # explain the alert's class
+                        d = self.drivers(p)
+                        drivers = [x.model_dump() for x in d] if d else None
+                    events.append((ev, drivers))
                 self.metrics.predictions.labels(p.class_name).inc()
+            events += self.chronic_events(well_id, preds)
             self.metrics.wells.set(len(self.stream.wells))
             alerts_out = []
-            for ev in events:
-                drivers = None
-                if ev.kind == "opened":
-                    trigger = next(p for p in preds if p.timestamp == ev.alert.opened_at)
-                    trigger.predicted_class = ev.alert.event_class  # explain the alert's class
-                    d = self.drivers(trigger)
-                    drivers = [x.model_dump() for x in d] if d else None
+            for ev, drivers in events:
                 self.store.save_alert(ev.alert, drivers)
                 out = self.alert_out(ev.alert, drivers)
                 alerts_out.append(out)
@@ -231,6 +245,27 @@ class Service:
         for a in alerts_out:
             await self.broadcast(well_id, {"type": "alert", "data": a.model_dump(mode="json")})
         return IngestResponse(predictions=pred_out, alerts=alerts_out)
+
+    def chronic_events(
+        self, well_id: str, preds: list[Prediction]
+    ) -> list[tuple[AlertEvent, list[dict[str, Any]] | None]]:
+        """Score new predictions with the well's instability profile (if any) and update its
+        chronic alert; opened alerts carry the profile's top drivers."""
+        if not preds or not self.profiles.has(well_id) or preds[0].inputs is None:
+            return []
+        x, base, blocks = (np.stack([p.inputs[i] for p in preds if p.inputs]) for i in range(3))
+        feats = self.predictor.features(x, base, blocks)
+        p_unstable = self.profiles.score(well_id, feats)
+        cls = int(self.profiles.section.get("class", 4))
+        out: list[tuple[AlertEvent, list[dict[str, Any]] | None]] = []
+        for p, pu, f in zip(preds, p_unstable, feats, strict=True):
+            probs = [0.0] * len(CLASS_NAMES)
+            probs[0], probs[cls] = 1.0 - float(pu), float(pu)
+            scored = Prediction(well_id, p.timestamp, cls, CLASS_NAMES[cls], float(pu), probs)
+            for ev in self.chronic.process(scored):
+                opened = ev.kind == "opened"
+                out.append((ev, self.profiles.drivers(well_id, f) if opened else None))
+        return out
 
     def start_demo(self, classes: list[int] | None, speed: int, loop: bool) -> dict[str, Any]:
         """Replay the bundled demo wells through :meth:`ingest` in the background."""
@@ -314,6 +349,7 @@ class Service:
             resolved_at=ts(a.resolved_at),
             peak_probability=a.peak_probability,
             top_drivers=[Driver(**d) for d in drivers] if drivers else None,
+            source=a.source,
         )
 
     async def broadcast(self, well_id: str, message: dict[str, Any]) -> None:
@@ -509,6 +545,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             stride_s=m["stride_s"],
             alert=m["alert"],
             metrics=m.get("metrics", {}),
+            chronic=(
+                {k: v for k, v in m["chronic"].items() if k not in ("features", "profiles")}
+                | {"wells": sorted(m["chronic"].get("profiles", {}))}
+                if m.get("chronic")
+                else None
+            ),
         )
 
     @app.post("/predict", response_model=PredictionOut, tags=["predict"])
@@ -556,13 +598,40 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if found is None:
                 raise HTTPException(404, f"alert {alert_id} not found")
             stored, drivers = found
-            live = svc.alerts.active(stored.well_id)
+            engine = svc.chronic if stored.source == "chronic" else svc.alerts
+            live = engine.active(stored.well_id)
             alert = live if live is not None and live.id == alert_id else stored
             AlertEngine.acknowledge(alert, pd.Timestamp.now(tz="UTC").tz_localize(None))
             svc.store.save_alert(alert)
         out = svc.alert_out(alert, drivers)
         await svc.broadcast(alert.well_id, {"type": "alert", "data": out.model_dump(mode="json")})
         return out
+
+    @app.post(
+        "/alerts/{alert_id}/feedback",
+        response_model=FeedbackOut,
+        tags=["alerts"],
+        dependencies=[Depends(require_key)],
+    )
+    def alert_feedback(alert_id: int, body: FeedbackIn, svc: Svc) -> FeedbackOut:
+        """Record an operator's verdict (confirmed, false alarm, flow instability): the labels
+        the next offline profile build (owfd.models.well_profiles) learns from."""
+        found = svc.store.get_alert(alert_id)
+        if found is None:
+            raise HTTPException(404, f"alert {alert_id} not found")
+        now = pd.Timestamp.now(tz="UTC").tz_localize(None).to_pydatetime()
+        return FeedbackOut(**svc.store.save_feedback(found[0], body.label, body.note, now))
+
+    @app.get("/feedback", response_model=list[FeedbackOut], tags=["alerts"])
+    def feedback(svc: Svc, well_id: str | None = None) -> list[FeedbackOut]:
+        """Operator feedback, newest first."""
+        return [FeedbackOut(**f) for f in svc.store.feedback(well_id)]
+
+    @app.get("/wells/{well_id}/profile", tags=["stream"])
+    def well_profile(well_id: str, svc: Svc) -> dict[str, Any]:
+        """Whether the well has a flow-instability profile, and what it was trained on."""
+        info = svc.profiles.info(well_id)
+        return {"well_id": well_id, "has_profile": info is not None, **(info or {})}
 
     @app.get("/wells", response_model=list[str], tags=["stream"])
     def wells(svc: Svc) -> list[str]:
