@@ -174,6 +174,17 @@ class Predictor:
                 probas.append(e / e.sum(axis=1, keepdims=True))
         return _softmax_t(np.mean(probas, axis=0), self.temperature)
 
+    def features(
+        self, x: np.ndarray, baseline: np.ndarray, blocks: np.ndarray | None = None
+    ) -> np.ndarray:
+        """Every tabular feature [n, n_features] (``owfd.features.context.all_feature_names``
+        order) of windows ``x`` [n, window_s, 2k], rounded to float16 like ``predict_proba``."""
+        x = x.astype(np.float16).astype(np.float32)
+        if blocks is None:
+            blocks = np.full((len(x), MAX_BLOCKS, len(self.variables)), np.nan)
+        short = window_features(x, self.variables, baseline)
+        return np.concatenate([short, context_features(blocks, baseline)], axis=1)
+
     def xgb_features(
         self, x: np.ndarray, baseline: np.ndarray, blocks: np.ndarray | None = None
     ) -> np.ndarray:

@@ -16,6 +16,12 @@
   **Streamlit** dashboard; ~30 ms inference, Docker, **GitHub Actions CI/CD**, 151 tests;
   deployed on Railway + Streamlit Cloud.
 
+- Reframed the largest failure mode after error analysis: chronic flow instability cannot be
+  learned across wells (AUC 0.57) but is separable within each well, so I built **per-well
+  profile models trained from operator feedback**, evaluated by replaying each well's history in
+  time order: system-wide detection rose from **27% to 78%** of fault episodes at +0.2 false
+  alarms/day (52% with only a quarter of past recordings labelled).
+
 ## Likely interview questions
 
 **1. Why split by well instead of randomly?**
@@ -81,3 +87,13 @@ about one false alarm per day. 71% of all episodes are flow instability, mostly 
 are unstable from the first minute of every recording, so "deviation from this well's normal"
 has nothing to compare with. Excluding those, 55% are caught. Reporting both numbers, and why
 they differ, is more useful than quoting the best split.
+
+**Follow-up: how did you get from 27% to 78%, and is that real?**
+Most misses were flow instability. A detector trained on other wells was barely better than
+chance (AUC 0.57): each well is unstable in its own way. Within a well it separates almost
+perfectly. So the product needs a feedback loop: operators label episodes, and each well gets a
+small profile model. I measured it the way it would be used: replaying each well's recordings in
+time order, every recording scored only by a profile trained on earlier, non-overlapping
+recordings, first episodes counted as misses. 78% is real for *tracking a known condition*:
+329 of 343 unstable episodes continue an earlier one, and only 4 of 14 brand-new onsets are
+caught. With only 25% of recordings labelled it is 52%.

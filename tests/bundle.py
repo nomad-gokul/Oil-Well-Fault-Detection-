@@ -82,3 +82,23 @@ def _write_manifest(out: Path, members: list[dict[str, object]]) -> Path:
     }  # fmt: skip
     (out / "manifest.json").write_text(json.dumps(manifest))
     return out
+
+
+def add_profile(bundle: Path, well_id: str, threshold: float = 0.8, k: int = 3) -> Path:
+    """Give ``well_id`` a (random) flow-instability profile in an existing bundle."""
+    names = all_feature_names(VARS)
+    rng = np.random.default_rng(5)
+    x = pd.DataFrame(rng.normal(size=(200, len(names))), columns=names)
+    y = x[names[0]] > 0
+    model = xgb.XGBClassifier(n_estimators=10, max_depth=2).fit(x, y)
+    (bundle / "profiles").mkdir(exist_ok=True)
+    model.save_model(bundle / "profiles" / f"{well_id}.json")
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    manifest["chronic"] = {
+        "threshold": threshold, "k": k, "class": 4, "features": names,
+        "profiles": {well_id: {"file": f"{well_id}.json", "source_well": "WELL-X",
+                               "trained_until": "2020-01-01", "unstable_windows": 100,
+                               "normal_windows": 100}},
+    }  # fmt: skip
+    (bundle / "manifest.json").write_text(json.dumps(manifest))
+    return bundle

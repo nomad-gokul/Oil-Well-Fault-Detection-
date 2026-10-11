@@ -90,6 +90,15 @@ class Client:
         """``POST /alerts/{id}/ack``."""
         return dict(self._post(f"/alerts/{alert_id}/ack"))
 
+    def feedback(self, alert_id: int, label: str) -> dict[str, Any]:
+        """Record an operator verdict on an alert (needs the API key)."""
+        try:
+            r = self.http.post(f"/alerts/{alert_id}/feedback", json={"label": label})
+        except httpx.HTTPError as exc:
+            raise ApiUnavailableError(str(exc)) from exc
+        r.raise_for_status()
+        return dict(r.json())
+
     def drift(self) -> dict[str, Any] | None:
         """``GET /monitoring/drift`` (None if the bundle has no training reference)."""
         try:

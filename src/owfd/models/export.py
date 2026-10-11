@@ -123,11 +123,31 @@ def build_bundle(
         "class_names": CLASS_NAMES,
         "metrics": metrics,
     }
+    chronic = _copy_profiles(settings, out_dir)
+    if chronic is not None:
+        manifest["chronic"] = chronic
     reference = training_reference(settings, PROJECT_ROOT / rel_scaler(serving))
     if reference is not None:
         (out_dir / "reference.json").write_text(json.dumps(reference))
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=1, default=str))
     return manifest
+
+
+def _copy_profiles(settings: Any, out_dir: Path) -> dict[str, Any] | None:
+    """Copy the newest per-well instability profiles (owfd.models.well_profiles build) into
+    the bundle's ``profiles/``; returns the manifest's ``chronic`` section, or None."""
+    root = settings.resolve(settings.artifacts_dir) / "well_profiles"
+    builds = (
+        sorted(p for p in root.glob("*") if (p / "profiles.json").exists()) if root.exists() else []
+    )
+    if not builds:
+        return None
+    section: dict[str, Any] = json.loads((builds[-1] / "profiles.json").read_text())
+    (out_dir / "profiles").mkdir(exist_ok=True)
+    for meta in section["profiles"].values():
+        shutil.copy(builds[-1] / meta["file"], out_dir / "profiles" / meta["file"])
+    section["build"] = builds[-1].name
+    return section
 
 
 def rel_scaler(serving: dict[str, Any]) -> str:

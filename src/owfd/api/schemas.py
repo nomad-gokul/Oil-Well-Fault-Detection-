@@ -78,6 +78,25 @@ class AlertOut(BaseModel):
     resolved_at: datetime | None
     peak_probability: float
     top_drivers: list[Driver] | None = None
+    source: str = Field(
+        "onset", description='"onset" (main model) or "chronic" (the well\'s instability profile)'
+    )
+
+
+class FeedbackIn(BaseModel):
+    """An operator's verdict on an alert."""
+
+    label: str = Field(pattern="^(confirmed|false_alarm|flow_instability)$")
+    note: str | None = Field(None, max_length=500)
+
+
+class FeedbackOut(FeedbackIn):
+    """Stored feedback."""
+
+    id: int
+    alert_id: int
+    well_id: str
+    created_at: datetime
 
 
 class IngestResponse(BaseModel):
@@ -109,6 +128,9 @@ class ModelOut(BaseModel):
     stride_s: int
     alert: dict[str, float | None]
     metrics: dict[str, float | int | str | None]
+    chronic: dict[str, Any] | None = Field(
+        None, description="per-well flow-instability profiles: alert rule and wells covered"
+    )
 
 
 class ErrorOut(BaseModel):

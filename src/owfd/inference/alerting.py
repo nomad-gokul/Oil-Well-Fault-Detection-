@@ -90,6 +90,8 @@ class Alert:
     acknowledged_at: pd.Timestamp | None = None
     resolved_at: pd.Timestamp | None = None
     class_votes: dict[int, float] = field(default_factory=dict)
+    #: "onset" (the main model) or "chronic" (a well's flow-instability profile).
+    source: str = "onset"
 
     @property
     def class_name(self) -> str:
@@ -119,14 +121,15 @@ class _WellState:
 class AlertEngine:
     """Applies :class:`AlertConfig` to each well's prediction stream."""
 
-    def __init__(self, config: AlertConfig) -> None:
+    def __init__(self, config: AlertConfig, source: str = "onset") -> None:
         self.config = config
+        self.source = source
         self.wells: dict[str, _WellState] = {}
 
     def restore(self, alerts: list[Alert]) -> None:
         """Re-attach unresolved alerts (e.g. loaded from the database after a restart)."""
         for alert in alerts:
-            if alert.status != AlertStatus.RESOLVED:
+            if alert.status != AlertStatus.RESOLVED and alert.source == self.source:
                 self.wells.setdefault(alert.well_id, _WellState()).active = alert
 
     def active(self, well_id: str) -> Alert | None:
@@ -183,7 +186,8 @@ class AlertEngine:
         )
         if s.run_above >= cfg.k and not in_cooldown:
             s.active = Alert(p.well_id, fault_class, cfg.severity_of(fault_class), p.timestamp,
-                             p.p_fault, class_votes={fault_class: p.p_fault})  # fmt: skip
+                             p.p_fault, class_votes={fault_class: p.p_fault},
+                             source=self.source)  # fmt: skip
             return [AlertEvent("opened", s.active)]
         return []
 
