@@ -99,3 +99,55 @@ def test_scenario_caption() -> None:
     normal = {"event_class": 0, "class_name": "Normal Operation", "source_well": None,
               "recorded_at": None}  # fmt: skip
     assert scenario_caption(normal) == "Actual: no fault (normal operation)"
+
+
+def test_duration_text() -> None:
+    from owfd.dashboard.client import duration_text
+
+    t0 = "2020-01-01T00:00:00"
+    assert duration_text(t0, "2020-01-01T00:00:30") == "just now"
+    assert duration_text(t0, "2020-01-01T00:25:00") == "25 min"
+    assert duration_text(t0, "2020-01-01T03:05:00") == "3 h 5 min"
+    assert duration_text(t0, "2020-01-01T02:00:00+00:00") == "2 h"  # naive vs UTC-aware
+    assert duration_text(t0, "2020-01-05T00:00:00") == "4 days"
+
+
+def test_plain_status_uses_the_worst_open_alert() -> None:
+    from owfd.dashboard.client import plain_status
+
+    alerts = [
+        {"status": "open", "severity": "low", "event_class": 4, "class_name": "Flow Instability",
+         "opened_at": "2020-01-01T00:00:00", "source": "chronic"},
+        {"status": "acknowledged", "severity": "high", "event_class": 8,
+         "class_name": "Hydrate in Production Line", "opened_at": "2020-01-01T00:20:00"},
+        {"status": "resolved", "severity": "high", "event_class": 2,
+         "class_name": "Spurious Closure of DHSV", "opened_at": "2019-12-31T00:00:00"},
+    ]  # fmt: skip
+    s = plain_status(alerts, 0.99, 0.85, now="2020-01-01T00:45:00")
+    assert s["level"] == "critical"
+    assert s["headline"] == "Ice-like plug forming in the production line"
+    assert s["action"].startswith("Act now")
+    assert s["duration"] == "25 min" and s["acknowledged"] and s["more"] == 1
+
+    chronic = plain_status(alerts[:1], 0.1, 0.85, now="2020-01-01T01:00:00")
+    assert chronic["level"] == "watch" and chronic["headline"] == "Long-running unstable flow"
+
+
+@pytest.mark.parametrize(
+    ("p", "level"), [(0.1, "normal"), (0.8, "watch"), (None, "no_data")]
+)  # fmt: skip
+def test_plain_status_without_alerts(p: float | None, level: str) -> None:
+    from owfd.dashboard.client import plain_status
+
+    resolved = [{"status": "resolved", "severity": "high", "event_class": 2, "class_name": "x",
+                 "opened_at": "2020-01-01T00:00:00"}]  # fmt: skip
+    s = plain_status(resolved, p, 0.85)
+    assert s["level"] == level and s["duration"] == "" and s["more"] == 0
+
+
+def test_every_fault_class_has_plain_text() -> None:
+    from owfd.dashboard.client import PLAIN_FAULTS, fault_text
+    from owfd.data.schema import CLASS_NAMES
+
+    assert set(PLAIN_FAULTS) == set(CLASS_NAMES) - {0}
+    assert fault_text(42, "Something new")[0] == "Something new"  # unknown class: API name
