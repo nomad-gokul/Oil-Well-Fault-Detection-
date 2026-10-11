@@ -1,0 +1,27 @@
+# Render Blueprint for the API (free plan). See docs/deployment.md.
+# Render builds docker/api.Dockerfile from this repository (model: deploy/bundle) on every push
+# to the selected branch.
+services:
+  - type: web
+    name: owfd-api
+    runtime: docker
+    dockerfilePath: ./docker/api.Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: OWFD_DEMO_MODE          # replay held-out test wells so visitors always see live data
+        value: "true"
+      - key: OWFD_DEMO_SPEED         # measured ~5.5% of one core (free plan: 0.1 CPU)
+        value: "30"
+      - key: OWFD_API_KEY            # protects /ingest, alert acknowledgement and demo controls
+        generateValue: true
+      - key: OWFD_RATE_LIMIT_PER_MIN
+        value: "600"
+      - key: OWFD_CORS_ORIGINS       # replace with your dashboard URL
+        value: '["https://oil-well-fault-detection.streamlit.app"]'
+      - key: OWFD_LOG_LEVEL
+        value: INFO
+      # Optional persistent alerts/predictions (free Postgres, e.g. Neon or Supabase):
+      # - key: OWFD_DATABASE_URL
+      #   value: postgresql+psycopg://USER:PASSWORD@HOST/DB?sslmode=require

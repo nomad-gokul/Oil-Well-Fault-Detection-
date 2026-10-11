@@ -2,7 +2,7 @@ PYTHON ?= python3.11
 VENV ?= .venv
 BIN := $(VENV)/bin
 
-.PHONY: install install-all lint format test clean
+.PHONY: install install-all lint format test clean serve dashboard publish-bundle up down
 
 $(BIN)/python:
 	$(PYTHON) -m venv $(VENV)
@@ -30,3 +30,18 @@ test:
 
 clean:
 	rm -rf .pytest_cache .mypy_cache .ruff_cache build *.egg-info src/*.egg-info
+
+serve:  ## API on http://localhost:8000/docs (newest bundle in artifacts/serving)
+	$(BIN)/uvicorn owfd.api.main:app --reload --port 8000
+
+dashboard:  ## Dashboard on http://localhost:8501
+	$(BIN)/streamlit run src/owfd/dashboard/app.py
+
+publish-bundle:  ## Copy the newest artifacts/serving bundle to deploy/bundle (commit it)
+	$(BIN)/python scripts/publish_bundle.py
+
+up:  ## Build and start the stack (dashboard: http://localhost:8501)
+	docker compose up -d --build --wait
+
+down:
+	docker compose down

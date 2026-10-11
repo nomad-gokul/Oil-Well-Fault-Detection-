@@ -23,3 +23,12 @@ def test_resolve_relative_to_project_root() -> None:
     settings = Settings()
     assert settings.resolve(Path("data/raw")) == PROJECT_ROOT / "data/raw"
     assert settings.resolve(Path("/abs/x")) == Path("/abs/x")
+
+
+def test_project_root_override(monkeypatch, tmp_path: Path) -> None:
+    from owfd import config
+
+    monkeypatch.setenv("OWFD_PROJECT_ROOT", str(tmp_path))
+    assert config._project_root() == tmp_path.resolve()
+    monkeypatch.delenv("OWFD_PROJECT_ROOT")
+    assert (config._project_root() / "configs").is_dir()  # source checkout

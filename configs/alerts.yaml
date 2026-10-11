@@ -1,0 +1,15 @@
+# Alert engine (Task 14). The opening rule (threshold, k) comes from the serving bundle,
+# tuned on validation in Task 10; these settings control the alert lifecycle.
+resolve_margin: 0.10      # resolve below (threshold - margin): hysteresis against flicker
+resolve_after: 10         # consecutive windows (minutes) below that level before resolving
+cooldown_s: 1800          # no new alert for the same well within 30 min of a resolution
+severity:                 # per event class; anything unlisted is "medium"
+  1: medium               # Abrupt Increase of BSW
+  2: high                 # Spurious Closure of DHSV (production stops)
+  3: low                  # Severe Slugging
+  4: low                  # Flow Instability
+  5: medium               # Rapid Productivity Loss
+  6: high                 # Quick Restriction in PCK
+  7: medium               # Scaling in PCK
+  8: high                 # Hydrate in Production Line (blockage)
+  9: high                 # Hydrate in Service Line (blockage)

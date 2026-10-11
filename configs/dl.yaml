@@ -1,0 +1,23 @@
+# Deep sequence model (Task 8). Input: 300 s x 21 channels (7 scaled sensors, 7 missing masks,
+# 7 deviations from the stream baseline).
+arch: cnn                  # cnn | gru
+use_baseline: true         # add 7 'sensor minus well baseline' channels (21 in total)
+cnn:
+  widths: [32, 64, 96]     # residual stages; each halves the time axis
+  kernel_size: 7
+  dropout: 0.2
+gru:
+  hidden: 64
+  layers: 2
+  pool: 5                  # average-pool the time axis by this factor first (300 -> 60 steps)
+  dropout: 0.2
+train:
+  epochs: 20
+  windows_per_epoch: 120000  # random subset of the train windows each epoch
+  batch_size: 256
+  lr: 0.002
+  weight_decay: 0.0001
+  grad_clip: 1.0
+  patience: 6              # early stopping on validation macro F1
+  class_weight_cap: 30.0
+  threads: 4

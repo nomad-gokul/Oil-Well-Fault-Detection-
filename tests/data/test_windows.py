@@ -124,3 +124,24 @@ def test_store_exposes_baselines(tiny_dataset: Path, tmp_path: Path) -> None:
     expected = df["P-PDG"].iloc[: min(row["end_pos"] + 1, 5)].mean()
     assert store.baselines(np.array([2]))[0, 0] == pytest.approx(expected, rel=1e-5)
     assert np.isnan(table[base_column("P-JUS-BS")]).all()  # never observed
+
+
+def test_relative_channels_remove_absolute_levels() -> None:
+    from owfd.data.windows import INPUT_MODES, relative_channels
+
+    rng = np.random.default_rng(0)
+    x = rng.normal(size=(3, 50, 4)).astype(np.float32)  # 2 sensors + 2 masks
+    x[:, :, 2:] = 0
+    base = rng.normal(size=(3, 2)).astype(np.float32)
+    base[0, 1] = np.nan
+    out = relative_channels(x, base)
+    assert out.shape == (3, 50, 6)
+    np.testing.assert_allclose(out[:, :, :2].mean(axis=1), 0, atol=1e-6)  # centered shapes
+    np.testing.assert_allclose(out[0, :, 5], 0)  # unknown baseline -> 0
+    # Shifting a well's whole operating level (sensor and its baseline) changes nothing.
+    shifted = x.copy()
+    shifted[:, :, 0] += 100.0
+    base2 = base.copy()
+    base2[:, 0] += 100.0
+    np.testing.assert_allclose(relative_channels(shifted, base2), out, atol=1e-4)
+    assert set(INPUT_MODES) == {"absolute", "relative"}

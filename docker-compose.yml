@@ -1,0 +1,50 @@
+# Local stack: `make up` (builds images, then http://localhost:8501).
+services:
+  api:
+    build: { context: ., dockerfile: docker/api.Dockerfile }
+    image: owfd-api:local
+    ports: ["8000:8000"]
+    environment:
+      OWFD_API_KEY: ${OWFD_API_KEY:-}
+      OWFD_DEMO_MODE: ${OWFD_DEMO_MODE:-true}        # replay bundled demo wells on startup
+      OWFD_DEMO_SPEED: ${OWFD_DEMO_SPEED:-60}
+      OWFD_CORS_ORIGINS: '["http://localhost:8501"]'
+      OWFD_DATABASE_URL: ${OWFD_DATABASE_URL:-sqlite:////data/owfd.db}
+      OWFD_ALERT_WEBHOOK_URL: ${OWFD_ALERT_WEBHOOK_URL:-}
+    volumes: ["api-data:/data"]
+
+  dashboard:
+    build: { context: ., dockerfile: docker/dashboard.Dockerfile }
+    image: owfd-dashboard:local
+    ports: ["8501:8501"]
+    environment:
+      OWFD_API_URL: http://api:8000
+      OWFD_API_KEY: ${OWFD_API_KEY:-}
+    depends_on:
+      api: { condition: service_healthy }
+
+  # Optional external simulator (the API's demo mode already replays wells):
+  #   docker compose --profile simulator up
+  simulator:
+    image: owfd-api:local
+    profiles: ["simulator"]
+    command: ["python", "-m", "owfd.simulator.replay", "--api", "http://api:8000", "--loop"]
+    environment:
+      OWFD_API_KEY: ${OWFD_API_KEY:-}
+    depends_on:
+      api: { condition: service_healthy }
+
+  # Optional Postgres instead of SQLite:
+  #   OWFD_DATABASE_URL=postgresql+psycopg://owfd:owfd@postgres/owfd docker compose --profile postgres up
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["postgres"]
+    environment: { POSTGRES_USER: owfd, POSTGRES_PASSWORD: owfd, POSTGRES_DB: owfd }
+    volumes: ["pg-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U owfd"]
+      interval: 5s
+
+volumes:
+  api-data:
+  pg-data:

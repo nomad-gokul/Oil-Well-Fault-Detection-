@@ -1,0 +1,14 @@
+# Written by python -m owfd.models.tune --model xgb
+class_weight_cap: 30.0
+model:
+  colsample_bytree: 0.3144091460070617
+  learning_rate: 0.146962368105409
+  max_bin: 256
+  max_depth: 3
+  min_child_weight: 15.930522616241015
+  n_estimators: 1000
+  reg_lambda: 7.579479953348009
+  subsample: 0.8540362888980227
+  tree_method: hist
+n_jobs: 4
+select_every: 50
