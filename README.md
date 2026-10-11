@@ -7,8 +7,9 @@ An ML early-warning system that detects operational faults in **offshore oil wel
 a **FastAPI** service with streaming ingestion, an alert engine and SHAP explanations, and a
 live **Streamlit** alert dashboard.
 
-**Live demo:** dashboard `https://<your-app>.streamlit.app` · API docs `https://<your-api>.onrender.com/docs`
-*(fill in after following [docs/deployment.md](docs/deployment.md))*
+**Live demo:** [dashboard](https://oilwellfaultdetection.streamlit.app/) ·
+[API docs](https://owfd-api-production.up.railway.app/docs) (10 held-out real wells replayed at 30x
+speed; the first load may take a minute while the services wake up)
 
 ![Live dashboard: fleet view](docs/figures/dashboard_fleet.png)
 
@@ -133,7 +134,7 @@ tests/         134 tests (unit, integration, API, dashboard) + a Locust load tes
 
 Python 3.11 · pandas · NumPy · XGBoost · PyTorch · Optuna · SHAP · MLflow · scikit-learn ·
 FastAPI · Pydantic v2 · SQLAlchemy · ONNX Runtime · Prometheus client · Streamlit · Plotly ·
-Docker · GitHub Actions · Render · Streamlit Community Cloud
+Docker · GitHub Actions · Railway / Render · Streamlit Community Cloud
 
 ## Limitations and future work
 
