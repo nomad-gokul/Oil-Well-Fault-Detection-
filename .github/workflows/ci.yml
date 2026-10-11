@@ -42,7 +42,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
       - name: Build API image (production model from deploy/bundle)
-        run: docker buildx build --load -f docker/api.Dockerfile -t owfd-api:ci .
+        run: docker buildx build --load -f Dockerfile -t owfd-api:ci .
       - name: Build dashboard image
         run: docker buildx build --load -f docker/dashboard.Dockerfile -t owfd-dashboard:ci .
       - name: Smoke test the API image

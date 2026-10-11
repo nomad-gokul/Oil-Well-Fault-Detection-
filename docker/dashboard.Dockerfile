@@ -5,10 +5,7 @@ ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PYTHONUNBUFFERED=1
 RUN useradd --create-home --uid 1000 app
 WORKDIR /app
 COPY requirements-dashboard.txt .
-# Behind a TLS-inspecting proxy, pass its CA: docker build --secret id=ca,src=<ca.pem> ...
-RUN --mount=type=secret,id=ca,required=false \
-    if [ -f /run/secrets/ca ]; then export PIP_CERT=/run/secrets/ca; fi \
- && pip install -r requirements-dashboard.txt
+RUN pip install -r requirements-dashboard.txt
 COPY src/owfd/__init__.py ./owfd/__init__.py
 COPY src/owfd/dashboard ./owfd/dashboard
 ENV PYTHONPATH=/app OWFD_API_URL=http://api:8000

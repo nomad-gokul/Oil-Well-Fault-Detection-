@@ -35,7 +35,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: docker/api.Dockerfile
+          file: Dockerfile
           push: true
           tags: |
             ${{ steps.names.outputs.api }}:${{ env.TAG }}

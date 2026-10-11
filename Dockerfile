@@ -10,18 +10,13 @@ ENV PATH=/opt/venv/bin:$PATH
 WORKDIR /build
 COPY requirements.txt .
 # Serving needs no GPU and no Parquet: CPU-only XGBoost, no NVIDIA libraries, no PyArrow.
-# Behind a TLS-inspecting proxy, pass its CA: docker build --secret id=ca,src=<ca.pem> ...
-RUN --mount=type=secret,id=ca,required=false \
-    if [ -f /run/secrets/ca ]; then export PIP_CERT=/run/secrets/ca; fi \
- && grep -vE '^(xgboost|nvidia-|pyarrow)' requirements.txt > serve.txt \
+RUN grep -vE '^(xgboost|nvidia-|pyarrow)' requirements.txt > serve.txt \
  && pip install "xgboost-cpu==$(grep -E '^xgboost==' requirements.txt | cut -d= -f3)" -r serve.txt
 # Only ship ONNX Runtime when the bundle contains a deep (ONNX) model.
 COPY ${BUNDLE}/manifest.json /tmp/manifest.json
 COPY pyproject.toml README.md ./
 COPY src ./src
-RUN --mount=type=secret,id=ca,required=false \
-    if [ -f /run/secrets/ca ]; then export PIP_CERT=/run/secrets/ca; fi \
- && pip install --no-deps . \
+RUN pip install --no-deps . \
  && if ! grep -q '"kind": "onnx"' /tmp/manifest.json; then pip uninstall -y onnxruntime; fi \
  && pip uninstall -y pip \
  && find /opt/venv -depth -type d \( -name tests -o -name __pycache__ \) -exec rm -rf {} +
