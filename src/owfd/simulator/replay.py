@@ -17,7 +17,9 @@ import json
 import logging
 from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -51,6 +53,35 @@ class Scenario:
     data: pd.DataFrame  # 1 Hz sensor readings (DatetimeIndex); labels are not sent
     labels: pd.Series = field(repr=False)  # ground truth, for evaluation/display only
     source: str = ""
+
+
+def describe_source(source: str) -> dict[str, str | None]:
+    """The real well and recording start of a 3W source such as ``4/WELL-00004_20140806010107``
+    (class folder / file name). Either is None when the source does not follow that pattern."""
+    well, _, stamp = source.rsplit("/", 1)[-1].partition("_")
+    try:
+        recorded = datetime.strptime(stamp, "%Y%m%d%H%M%S").isoformat()
+    except ValueError:
+        recorded = None
+    return {"source_well": well if well.startswith("WELL-") else None, "recorded_at": recorded}
+
+
+def demo_catalog(directory: Path = DEMO_DIR) -> dict[str, dict[str, Any]]:
+    """What each bundled demo well replays, read from ``manifest.json`` alone (no readings):
+    ``{well_id: {event_class, class_name, source, source_well, recorded_at}}``."""
+    path = directory / "manifest.json"
+    if not path.exists():
+        return {}
+    catalog = {}
+    for item in json.loads(path.read_text())["scenarios"]:
+        cls, source = int(item["event_class"]), str(item.get("source", ""))
+        catalog[item["well_id"]] = {
+            "event_class": cls,
+            "class_name": CLASS_NAMES[cls],
+            "source": source,
+            **describe_source(source),
+        }
+    return catalog
 
 
 def load_demo(directory: Path = DEMO_DIR, classes: list[int] | None = None) -> list[Scenario]:

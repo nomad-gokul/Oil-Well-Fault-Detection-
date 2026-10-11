@@ -26,6 +26,8 @@ from owfd.dashboard.client import (  # noqa: E402
     ApiUnavailableError,
     Client,
     display_units,
+    scenario_caption,
+    scenario_source,
     well_status,
 )
 
@@ -47,6 +49,20 @@ def setting(name: str) -> str | None:
 @st.cache_resource
 def client() -> Client:
     return Client(setting("OWFD_API_URL"), setting("OWFD_API_KEY"))
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _demo_scenarios() -> dict[str, dict]:
+    return dict(client().demo().get("scenarios") or {})
+
+
+def demo_scenarios() -> dict[str, dict]:
+    """What each bundled demo well replays: true fault class and the real 3W well it comes
+    from (``GET /demo``). Empty when the API is unreachable (errors are not cached)."""
+    try:
+        return _demo_scenarios()
+    except (ApiUnavailableError, httpx.HTTPStatusError):
+        return {}
 
 
 def api_down(exc: Exception) -> None:
@@ -123,6 +139,7 @@ def fleet(model: dict) -> None:
         if len(unresolved) and "source" in unresolved
         else set()
     )
+    scenarios = demo_scenarios()
     cols = st.columns(4)
     for i, well in enumerate(wells):
         preds = client().predictions(well, limit=1)
@@ -136,16 +153,18 @@ def fleet(model: dict) -> None:
                 f"● {status}</span>",
                 unsafe_allow_html=True,
             )
+            if well in scenarios:  # demo replay: the real source well and its true condition
+                st.caption(f"🛢️ {scenario_caption(scenarios[well])}")
             if well in chronic:
                 st.caption("〰️ Chronic instability (well profile)")
             if a is not None:
                 st.caption(
-                    f"{SEVERITY_ICON.get(a['severity'], '')} {a['class_name']} · "
+                    f"{SEVERITY_ICON.get(a['severity'], '')} Alarm: {a['class_name']} · "
                     f"peak P={a['peak_probability']:.2f}"
                 )
             elif len(preds):
                 cls = model["classes"][str(int(preds["predicted_class"].iloc[-1]))]
-                st.caption(f"{cls} · P(fault)={p:.2f}")
+                st.caption(f"Model: {cls} · P(fault)={p:.2f}")
             if p is not None:
                 st.progress(min(max(p, 0.0), 1.0))
 
@@ -159,6 +178,16 @@ def well_detail(model: dict, well: str) -> None:
     except ApiUnavailableError as exc:
         api_down(exc)
         return
+    info = demo_scenarios().get(well)
+    if info:
+        source = scenario_source(info)  # e.g. "WELL-00004, Aug 2014"
+        st.info(
+            f"Demo replay of a held-out recording from the Petrobras 3W test set"
+            f"{f' (real well and month recorded: **{source}**)' if source else ''}. Actual "
+            f"condition in this recording: **{info['class_name']}**. Compare it with what the "
+            f"model detects below.",
+            icon="🛢️",
+        )
     if preds.empty:
         st.info("No predictions yet for this well.")
         return

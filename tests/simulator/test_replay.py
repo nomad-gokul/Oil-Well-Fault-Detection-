@@ -6,7 +6,16 @@ import pandas as pd
 import pytest
 
 from owfd.config import PROJECT_ROOT
-from owfd.simulator.replay import Replay, Scenario, load_demo, read_scenario, run, write_scenario
+from owfd.simulator.replay import (
+    Replay,
+    Scenario,
+    demo_catalog,
+    describe_source,
+    load_demo,
+    read_scenario,
+    run,
+    write_scenario,
+)
 from tests.bundle import raw_instance
 
 
@@ -75,3 +84,20 @@ def test_scenario_roundtrip_is_exact(tmp_path: Path) -> None:
         df2, df, check_freq=False, check_names=False, check_index_type=False
     )
     assert labels2.isna().sum() == 10 and labels2.iloc[-1] == 107
+
+
+def test_describe_source() -> None:
+    assert describe_source("4/WELL-00004_20140806010107") == {
+        "source_well": "WELL-00004", "recorded_at": "2014-08-06T01:01:07"}  # fmt: skip
+    assert describe_source("x") == {"source_well": None, "recorded_at": None}
+    assert describe_source("3/SIMULATED_00001") == {"source_well": None, "recorded_at": None}
+
+
+def test_demo_catalog(tmp_path: Path) -> None:
+    assert demo_catalog(tmp_path) == {}  # no manifest
+    catalog = demo_catalog(make_demo_dir(tmp_path / "d", {"demo-a": 10, "demo-b": 10}))
+    assert catalog["demo-b"]["event_class"] == 1 and catalog["demo-b"]["source_well"] is None
+    bundled = PROJECT_ROOT / "demo_data"
+    if (bundled / "manifest.json").exists():
+        info = demo_catalog(bundled)["demo-4-instability"]
+        assert info["class_name"] == "Flow Instability" and info["source_well"] == "WELL-00004"

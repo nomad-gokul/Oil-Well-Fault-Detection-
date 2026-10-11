@@ -161,6 +161,7 @@ class Service:
         self.recent: dict[str, deque[pd.DataFrame]] = defaultdict(deque)
         self.demo_task: asyncio.Task[int] | None = None
         self.demo_info: dict[str, Any] = {}
+        self.demo_scenarios = self._demo_catalog()
         self.metrics = Metrics(self.version, self.manifest["model"])
         ref = self.bundle / "reference.json"
         self.reference: dict[str, Any] | None = (
@@ -299,9 +300,20 @@ class Service:
         return self.demo_status()
 
     def demo_status(self) -> dict[str, Any]:
-        """Whether the demo replay is running, and its settings."""
+        """Whether the demo replay is running, its settings, and what each demo well replays
+        (fault class and the real 3W well and recording it was cut from)."""
         running = self.demo_task is not None and not self.demo_task.done()
-        return {"running": running, **self.demo_info}
+        return {"running": running, **self.demo_info, "scenarios": self.demo_scenarios}
+
+    def _demo_catalog(self) -> dict[str, dict[str, Any]]:
+        """The bundled demo set's manifest, by well id (empty if missing or unreadable)."""
+        from owfd.simulator.replay import demo_catalog
+
+        try:
+            return demo_catalog(self.settings.resolve(self.settings.demo_dir))
+        except (OSError, ValueError, KeyError) as exc:
+            logger.warning("Could not read the demo manifest: %s", exc)
+            return {}
 
     def _explainer(self) -> Any:
         xgb_members = [m for m in self.manifest["members"] if m["kind"] == "xgb"]

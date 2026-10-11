@@ -87,3 +87,15 @@ def test_app_reads_streamlit_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
     at.run()
     assert not at.exception
     assert any("http://127.0.0.1:9" in w.value for w in at.warning)
+
+
+def test_scenario_caption() -> None:
+    from owfd.dashboard.client import scenario_caption, scenario_source
+
+    info = {"event_class": 4, "class_name": "Flow Instability", "source_well": "WELL-00004",
+            "recorded_at": "2014-08-06T01:01:07"}  # fmt: skip
+    assert scenario_source(info) == "WELL-00004, Aug 2014"
+    assert scenario_caption(info) == "Real well: WELL-00004, Aug 2014 · actual: Flow Instability"
+    normal = {"event_class": 0, "class_name": "Normal Operation", "source_well": None,
+              "recorded_at": None}  # fmt: skip
+    assert scenario_caption(normal) == "Actual: no fault (normal operation)"

@@ -134,6 +134,25 @@ def well_status(p_fault: float | None, threshold: float, alert_status: str | Non
     return "Warning" if p_fault > threshold - 0.15 else "Normal"
 
 
+def scenario_source(info: dict[str, Any]) -> str:
+    """Where a demo well's data comes from, e.g. ``"WELL-00004, Aug 2014"`` (``""`` if unknown)."""
+    well = info.get("source_well")
+    recorded = info.get("recorded_at")
+    when = pd.Timestamp(recorded).strftime("%b %Y") if recorded else ""
+    return ", ".join(part for part in (well, when) if part)
+
+
+def scenario_caption(info: dict[str, Any]) -> str:
+    """One line for a demo well's fleet card: the real well it replays and its true condition."""
+    source = scenario_source(info)
+    truth = (
+        "no fault (normal operation)"
+        if int(info.get("event_class", -1)) == 0
+        else str(info.get("class_name", "unknown"))
+    )
+    return f"Real well: {source} · actual: {truth}" if source else f"Actual: {truth}"
+
+
 def display_units(readings: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, str]]:
     """Readings in engineering units for charts: pressures Pa -> bar; temperatures in degC,
     gas-lift flow in m3/s. Physically impossible placeholder values (> 1e4 bar) are hidden."""

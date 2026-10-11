@@ -183,7 +183,10 @@ def test_demo_mode_endpoints(bundle: Path, tmp_path: Path) -> None:
     demo = make_demo_dir(tmp_path / "demo", {"demo-a": 400, "demo-b": 360})
     s = settings(bundle, tmp_path / "db.sqlite", demo_dir=demo)
     with TestClient(create_app(s)) as c:
-        assert c.get("/demo").json() == {"running": False}
+        idle = c.get("/demo").json()
+        assert idle["running"] is False
+        assert set(idle["scenarios"]) == {"demo-a", "demo-b"}  # what each demo well replays
+        assert idle["scenarios"]["demo-b"]["class_name"] == "Abrupt Increase of BSW"
         assert c.post("/demo/start").status_code == 401
         started = c.post("/demo/start", params={"speed": 400, "loop": False}, headers=KEY).json()
         assert started["running"] and started["wells"] == ["demo-a", "demo-b"]
